@@ -40,7 +40,7 @@ export CMD=" \
     "
 
 export LAUNCHER="HF_HUB_ENABLE_HF_TRANSFER=1 ACCELERATE_LOG_LEVEL=info TRANSFORMERS_VERBOSITY=info accelerate launch \
-    --config_file accelerate_configs/$ACCELERATOR.yaml  \
+    --config_file configs/$ACCELERATOR.yaml  \
     --gradient_accumulation_steps $GRAD_ACC_STEPS \
     --num_machines $NUM_NODES \
     --num_processes $WORLD_SIZE \
