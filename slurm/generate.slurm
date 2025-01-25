@@ -2,7 +2,7 @@
 #SBATCH --job-name=deepseek-r1-generation
 #SBATCH --partition=hopper-prod
 #SBATCH --qos=normal
-#SBATCH --nodes=2
+#SBATCH --nodes=4
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
 #SBATCH --output=./logs/%x-%j.out
@@ -44,6 +44,10 @@ while [[ $# -gt 0 ]]; do
             MAX_NEW_TOKENS="$2"
             shift 2
             ;;
+        --num-generations)
+            NUM_GENERATIONS="$2"
+            shift 2
+            ;;
         --hf-output-dataset)
             HF_OUTPUT_DATASET="$2"
             shift 2
@@ -64,14 +68,31 @@ if [ -z "$MODEL" ] || [ -z "$HF_DATASET" ]; then
     exit 1
 fi
 
+# Set default values for optional parameters
 HF_DATASET_SPLIT=${HF_DATASET_SPLIT:-"train"}
 PROMPT_COLUMN=${PROMPT_COLUMN:-"prompt"}
-TEMPERATURE=${TEMPERATURE:-0.7}
-TOP_P=${TOP_P:-0.9}
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-8192}
+NUM_GENERATIONS=${NUM_GENERATIONS:-1}
 PRIVATE=${PRIVATE:-"false"}
 
+# Print all input arguments
+echo "Input arguments:"
+echo "MODEL: $MODEL"
+echo "HF_DATASET: $HF_DATASET"
+echo "HF_DATASET_CONFIG: $HF_DATASET_CONFIG"
+echo "HF_DATASET_SPLIT: $HF_DATASET_SPLIT"
+echo "PROMPT_COLUMN: $PROMPT_COLUMN"
+echo "TEMPERATURE: $TEMPERATURE"
+echo "TOP_P: $TOP_P"
+echo "MAX_NEW_TOKENS: $MAX_NEW_TOKENS"
+echo "NUM_GENERATIONS: $NUM_GENERATIONS"
+echo "HF_OUTPUT_DATASET: $HF_OUTPUT_DATASET"
+echo "PRIVATE: $PRIVATE"
+echo "-------------------"
+
 set -ex
+
+module load cuda/12.1
 
 export LD_LIBRARY_PATH=.venv/lib/python3.11/site-packages/nvidia/nvjitlink/lib
 
@@ -127,19 +148,19 @@ RAY_ADDRESS="http://$head_node_ip:8265" ray job submit \
     --no-wait \
     -- vllm serve $MODEL \
     --tensor-parallel-size 8 \
-    --pipeline-parallel-size 2 \
-    --max-model-len 32768 \
+    --pipeline-parallel-size 4 \
+    --max-model-len 16384 \
     --enable-chunked-prefill \
     --trust-remote-code \
     --distributed-executor-backend ray
 
 # wait for vllm to load the model
-echo "Waiting for vLLM (http://localhost:8000) server to be up..."
+echo "Waiting for vLLM (http://$head_node_ip:8000) server to be up..."
 
 # wait for vllm to load and serve the model
 while true; do
-    if curl -s -o /dev/null -w "%{http_code}" http://localhost:8000 >/dev/null 2>&1; then
-        echo "Received response from http://localhost:8000"
+    if curl -s -o /dev/null -w "%{http_code}" http://$head_node_ip:8000 >/dev/null 2>&1; then
+        echo "Received response from http://$head_node_ip:8000"
         break
     else
         echo "Still waiting... (Press Ctrl+C to cancel)"
@@ -148,21 +169,32 @@ while true; do
 done
 
 echo "Checking available models..."
-curl http://localhost:8000/v1/models
+curl http://$head_node_ip:8000/v1/models
+
+echo "Executing sanity check..."
+curl http://$head_node_ip:8000/v1/completions \
+    -H "Content-Type: application/json" \
+    -d "{
+        \"model\": \"$MODEL\",
+        \"prompt\": \"<｜begin▁of▁sentence｜><｜User｜>hi, how are you?<｜Assistant｜>\",
+        \"max_tokens\": 2048,
+        \"temperature\": 0.6
+    }"
 
 # Finally submit the job to the cluster
 echo "Submitting job to ray cluster..."
 RAY_ADDRESS="http://$head_node_ip:8265" ray job submit \
-    --working-dir pipeline \
+    --working-dir src/open_r1 \
     -- python -u generate.py \
     --model "$MODEL" \
     --hf-dataset "$HF_DATASET" \
     ${HF_DATASET_CONFIG:+--hf-dataset-config "$HF_DATASET_CONFIG"} \
     --hf-dataset-split "$HF_DATASET_SPLIT" \
     --prompt-column "$PROMPT_COLUMN" \
-    --temperature "$TEMPERATURE" \
-    --top-p "$TOP_P" \
+    ${TEMPERATURE:+--temperature "$TEMPERATURE"} \
+    ${TOP_P:+--top-p "$TOP_P"} \
     --max-new-tokens "$MAX_NEW_TOKENS" \
+    --num-generations "$NUM_GENERATIONS" \
     ${HF_OUTPUT_DATASET:+--hf-output-dataset "$HF_OUTPUT_DATASET"} \
     ${PRIVATE:+--private} \
     --vllm-server-url "http://$head_node_ip:8000/v1"

@@ -23,23 +23,32 @@ def build_distilabel_pipeline(
     model: str,
     base_url: str = "http://localhost:8000/v1",
     prompt_column: Optional[str] = None,
-    temperature: float = 0.7,
-    top_p: float = 0.9,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
     max_new_tokens: int = 8192,
+    num_generations: int = 1,
 ) -> Pipeline:
+    generation_kwargs = {"max_new_tokens": max_new_tokens}
+
+    if temperature is not None:
+        generation_kwargs["temperature"] = temperature
+
+    if top_p is not None:
+        generation_kwargs["top_p"] = top_p
+
     with Pipeline().ray() as pipeline:
         TextGeneration(
             llm=OpenAILLM(
                 base_url=base_url,
                 api_key="something",
                 model=model,
-                generation_kwargs={
-                    "temperature": temperature,
-                    "top_p": top_p,
-                    "max_new_tokens": max_new_tokens,
-                },
+                # thinking can take some time...
+                timeout=10 * 60,
+                generation_kwargs=generation_kwargs,
             ),
             input_mappings={"instruction": prompt_column} if prompt_column is not None else {},
+            input_batch_size=10,
+            num_generations=num_generations,
         )
 
     return pipeline
@@ -85,13 +94,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.7,
         help="Temperature for generation",
     )
     parser.add_argument(
         "--top-p",
         type=float,
-        default=0.9,
         help="Top-p value for generation",
     )
     parser.add_argument(
@@ -99,6 +106,12 @@ if __name__ == "__main__":
         type=int,
         default=8192,
         help="Maximum number of new tokens to generate",
+    )
+    parser.add_argument(
+        "--num-generations",
+        type=int,
+        default=1,
+        help="Number of generations per problem",
     )
     parser.add_argument(
         "--hf-output-dataset",
@@ -120,7 +133,7 @@ if __name__ == "__main__":
     print()
 
     print(f"Loading '{args.hf_dataset}' (config: {args.hf_dataset_config}, split: {args.hf_dataset_split}) dataset...")
-    dataset = load_dataset(args.hf_dataset, split=args.hf_dataset_split).select(range(50))
+    dataset = load_dataset(args.hf_dataset, split=args.hf_dataset_split)
     print("Dataset loaded!")
 
     pipeline = build_distilabel_pipeline(
@@ -130,10 +143,11 @@ if __name__ == "__main__":
         temperature=args.temperature,
         top_p=args.top_p,
         max_new_tokens=args.max_new_tokens,
+        num_generations=args.num_generations,
     )
 
     print("Running generation pipeline...")
-    distiset = pipeline.run(dataset=dataset, dataset_batch_size=5000)
+    distiset = pipeline.run(dataset=dataset, use_cache=False)
     print("Generation pipeline finished!")
 
     if args.hf_output_dataset:
