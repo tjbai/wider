@@ -5,14 +5,8 @@
 #SBATCH --exclusive
 #SBATCH --gres=gpu:8
 #SBATCH --partition=hopper-prod 
-#SBATCH --time=01:59:00
-#SBATCH --output=/fsx/h4/logs/%x-%j.out
-#SBATCH --err=/fsx/h4/logs/%x-%j.err
-"""Usage:
-
-"""
-
-sbatch 
+#SBATCH --output=./logs/%x-%j.out
+#SBATCH --err=./logs/%x-%j.err
 
 set -x -e
 
