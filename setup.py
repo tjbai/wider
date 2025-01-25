@@ -59,8 +59,8 @@ _deps = [
     "safetensors>=0.3.3",
     "sentencepiece>=0.1.99",
     "torch>=2.5.1",
-    "transformers==4.48.1",
-    "trl @ git+https://github.com/huggingface/trl.git@6f99f42f724123409422f2fad42bf56fa91f366f",  # Bump when this is merged: https://github.com/huggingface/trl/pull/2650
+    "transformers @ git+https://github.com/huggingface/transformers.git@main",
+    "trl @ git+https://github.com/huggingface/trl.git@main",
     "vllm==0.6.6.post1",
     "wandb>=0.19.1",
     "distilabel[vllm,ray,openai]>=1.5.2",
