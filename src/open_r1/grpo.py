@@ -89,6 +89,13 @@ reward_funcs_registry = {
     "format": format_reward_func,
 }
 
+SYSTEM_PROMPT = (
+    "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant "
+    "first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning "
+    "process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., "
+    "<think> reasoning process here </think><answer> answer here </answer>"
+)
+
 
 def main(script_args, training_args, model_args):
     # Get reward functions
@@ -101,7 +108,10 @@ def main(script_args, training_args, model_args):
     def make_conversation(example):
         ground_truth = extract_boxed_content(example["solution"])
         return {
-            "prompt": [{"role": "user", "content": example["problem"]}],
+            "prompt": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": example["problem"]},
+            ],
             "ground_truth": ground_truth,
         }
 

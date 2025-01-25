@@ -60,7 +60,7 @@ sudo apt-get install git-lfs
 ### GRPO
 
 ```
-accelerate launch scripts/training/grpo.py \
+accelerate launch src/open_r1/grpo.py \
     --output_dir Qwen2.5-0.5B-GRPO \
     --model_name_or_path Qwen/Qwen2.5-0.5B-Instruct \
     --dataset_name AI-MO/NuminaMath-TIR \
