@@ -22,7 +22,7 @@ We will use the DeepSeek-R1 [tech report](https://github.com/deepseek-ai/DeepSee
 * Step 3: show we can go from base model to RL-tuned via multi-stage training.
 
 <center>
-    <img src="assets/plan-of-attack.png" width="400">
+    <img src="assets/plan-of-attack.png" width="500">
 </center>
 
 
