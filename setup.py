@@ -43,7 +43,7 @@ if stale_egg_info.exists():
 _deps = [
     "accelerate>=1.2.1",
     "bitsandbytes>=0.43.0",
-    "black>=24.4.2",
+    "ruff>=0.9.0",
     "datasets>=3.2.0",
     "deepspeed==0.15.4",
     "distilabel[vllm,ray,openai]>=1.5.2",
@@ -83,7 +83,7 @@ def deps_list(*pkgs):
 extras = {}
 extras["tests"] = deps_list("pytest", "parameterized")
 extras["torch"] = deps_list("torch")
-extras["quality"] = deps_list("black", "isort", "flake8")
+extras["quality"] = deps_list("ruff", "isort", "flake8")
 extras["eval"] = deps_list("lighteval", "math-verify")
 extras["dev"] = extras["quality"] + extras["tests"] + extras["eval"]
 
