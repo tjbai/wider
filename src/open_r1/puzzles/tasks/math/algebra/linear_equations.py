@@ -1,7 +1,9 @@
-from ....base_task import BaseTask
-from ....base_config import BaseConfig
-import numpy as np
 import re
+
+import numpy as np
+
+from ....base_config import BaseConfig
+from ....base_task import BaseTask
 
 
 class LinearEquationConfig(BaseConfig):
@@ -15,7 +17,7 @@ class LinearEquationTask(BaseTask):
     config_class = LinearEquationConfig
 
     def generate_sample(self, config: LinearEquationConfig, rng: np.random.Generator):
-        variable_names = ('x', 'y', 'z', 'a', 'b', 'c')
+        variable_names = ("x", "y", "z", "a", "b", "c")
         var_name = rng.choice(variable_names)
         var_coefficient = 0
         while var_coefficient == 0:

@@ -16,7 +16,7 @@ After `pip install`ing the open-r1 repo, you can very quickly get started
 '-2y - 4 = -16'
 
 # To score a model output, use task.validate()
->>> task.validate("y = 6", answer)
+>>> task.verify("y = 6", answer)
 1.0
 
 >>> # To control the task difficulty, you can use the task's associated config
@@ -35,4 +35,3 @@ After `pip install`ing the open-r1 repo, you can very quickly get started
 - Proper indexing of puzzles
 - More puzzle types!
 - Lazy loading (if the module gets very big)
-- Gu

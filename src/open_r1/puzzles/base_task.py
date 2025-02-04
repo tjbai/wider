@@ -1,10 +1,15 @@
 from __future__ import annotations
-import numpy as np
-from .base_config import BaseConfig
-from random import randint
+
 from abc import ABC, abstractmethod
+from random import randint
+
+import numpy as np
+
+from .base_config import BaseConfig
+
 
 MAX_INT = np.iinfo(np.int64).max
+
 
 class BaseTask(ABC):
     config_class = None
@@ -29,7 +34,6 @@ class BaseTask(ABC):
     def __iter__(self):
         for i in range(len(self)):
             yield self[i]
-
 
     def get_rng(self, idx) -> np.random.Generator:
         return np.random.default_rng(self.scrambled_seed + idx)
