@@ -25,3 +25,14 @@ After `pip install`ing the open-r1 repo, you can very quickly get started
 >>> config.max_coefficient = 1000
 >>> harder_task = LinearEquationTask(config)
 ```
+
+## Adding new puzzles
+
+[add puzzle guide goes here]
+
+## Coming soon:
+
+- Proper indexing of puzzles
+- More puzzle types!
+- Lazy loading (if the module gets very big)
+- Gu

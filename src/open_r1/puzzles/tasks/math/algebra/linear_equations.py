@@ -10,6 +10,7 @@ class LinearEquationConfig(BaseConfig):
     min_var_value = -10
     max_var_value = 10
 
+
 class LinearEquationTask(BaseTask):
     config_class = LinearEquationConfig
 
@@ -37,7 +38,7 @@ class LinearEquationTask(BaseTask):
 
         return equation, var_value
 
-    def validate(self, output, answer):
+    def verify(self, output, answer):
         # If there's only one number in the output, it's the answer
         numbers = re.findall(r"\d+", output)
         if len(numbers) == 1:

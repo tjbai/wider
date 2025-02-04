@@ -44,6 +44,6 @@ class BaseTask(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def validate(self, output, answer) -> float:
+    def verify(self, output, answer) -> float:
         # This should return a score between 0. and 1. based on how well the output matches the answer
         raise NotImplementedError
