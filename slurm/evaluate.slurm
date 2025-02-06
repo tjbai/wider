@@ -6,13 +6,14 @@
 #SBATCH --err=./logs/%x-%j.err
 #SBATCH --requeue
 
-set -x -e
-source ~/.bashrc
-source openr1/bin/activate
-
 # Specific configuration optimized for the Hugging Face Compute Cluster
 # Be ye warned this may not work on other clusters!
-module load cuda/12.1
+module load cuda/12.4
+
+set -x -e
+
+source ~/.bashrc
+source openr1/bin/activate
 
 TASK_NAME=$1
 TASKS=$2
