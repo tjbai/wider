@@ -162,9 +162,6 @@ def get_repetition_penalty_reward(ngram_size: int, max_penalty: float):
     if max_penalty > 0:
         raise ValueError(f"max_penalty {max_penalty} should not be positive")
 
-    if max_penalty == 0:
-        return 0
-
     def zipngram(text: str, ngram_size: int):
         words = text.lower().split()
         return zip(*[words[i:] for i in range(ngram_size)])
@@ -178,8 +175,9 @@ def get_repetition_penalty_reward(ngram_size: int, max_penalty: float):
             completions: List of model completions
         """
 
+        contents = [completion[0]["content"] for completion in completions]
         rewards = []
-        for completion in completions:
+        for completion in contents:
             if completion == "":
                 rewards.append(0.0)
                 continue
