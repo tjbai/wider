@@ -69,7 +69,7 @@ uv venv openr1 --python 3.11 && source openr1/bin/activate && uv pip install --u
 Next, install vLLM and FlashAttention:
 
 ```shell
-uv pip install vllm==0.7.2
+uv pip install vllm==0.8.3
 uv pip install setuptools && uv pip install flash-attn --no-build-isolation
 ```
 
@@ -100,6 +100,9 @@ sudo apt-get install git-lfs
 
 ## Training models
 
+> [!NOTE]
+> The training commands below are configured for a node of 8 x H100s (80GB). For different hardware and topologies, you may need to tune the batch size and number of gradient accumulation steps.
+
 We support training models with either DDP or DeepSpeed (ZeRO-2 and ZeRO-3). For example, to run SFT on a dataset distilled from DeepSeek-R1 with reasoning traces such as [open-r1/OpenR1-Math-220k](https://huggingface.co/datasets/open-r1/OpenR1-Math-220k), run:
 
 ```shell
@@ -107,13 +110,14 @@ We support training models with either DDP or DeepSpeed (ZeRO-2 and ZeRO-3). For
 accelerate launch --config_file=recipes/accelerate_configs/zero3.yaml src/open_r1/sft.py \
     --model_name_or_path Qwen/Qwen2.5-1.5B-Instruct \
     --dataset_name open-r1/OpenR1-Math-220k \
-    --learning_rate 1.0e-5 \
+    --learning_rate 5.0e-5 \
     --num_train_epochs 1 \
     --packing \
     --max_seq_length 16384 \
     --per_device_train_batch_size 16 \
     --gradient_checkpointing \
     --bf16 \
+    --use_liger_kernel \
     --output_dir data/Qwen2.5-1.5B-Open-R1-Distill
 
 # Train via YAML config
@@ -145,9 +149,6 @@ accelerate launch --config_file recipes/accelerate_configs/zero3.yaml src/open_r
     --config recipes/Qwen2.5-1.5B-Instruct/sft/config_demo.yaml
     --wandb_entity huggingface --wandb_project open-r1 --run_name Qwen2.5-1.5B-GRPO
 ```
-
-> [!NOTE]
-> The training commands below are configured for a node of 8 x H100s (80GB). For different hardware and topologies, you may need to tune the batch size and number of gradient accumulation steps.
 
 ### SFT
 
