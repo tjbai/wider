@@ -7,6 +7,7 @@ from .hub import get_gpu_count_for_vllm, get_param_count_from_repo_id
 if TYPE_CHECKING:
     from trl import GRPOConfig, SFTConfig, ModelConfig
 
+import base64
 import os
 
 
@@ -88,7 +89,10 @@ def run_lighteval_job(
         f"{model_args.trust_remote_code}",
     ]
     if training_args.system_prompt is not None:
-        cmd_args.append(f"--system_prompt={training_args.system_prompt}")
+        # encode to base64 to avoid issues with special characters
+        # we decode in the sbatch script
+        prompt_encoded = base64.b64encode(training_args.system_prompt.encode()).decode()
+        cmd_args.append(prompt_encoded)
     cmd[-1] += " " + " ".join(cmd_args)
     subprocess.run(cmd, check=True)
 
