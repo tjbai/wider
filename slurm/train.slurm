@@ -2,8 +2,8 @@
 #SBATCH --job-name=open_r1
 #SBATCH --ntasks-per-node=1
 #SBATCH --exclusive
-#SBATCH --gres=gpu:8
-#SBATCH --partition=hopper-prod  # Adjust this for your cluster
+#SBATCH --gres=gpu:4
+#SBATCH --partition=gpu
 #SBATCH --output=./logs/%x-%j.out
 #SBATCH --error=./logs/%x-%j.err
 #SBATCH --requeue
@@ -26,7 +26,7 @@ module load cuda/12.4
 set -x -e
 
 source ~/.bashrc
-source openr1/bin/activate
+source .venv/bin/activate
 START_TIME=$(date +%s)
 echo "START TIME: $(date)"
 
@@ -105,9 +105,8 @@ echo "Gradient accumulation steps: $GRAD_ACC_STEPS"
 MODEL=$(grep 'model_name_or_path:' $CONFIG_FILE | awk '{print $2}')
 REVISION=$(grep 'model_revision:' $CONFIG_FILE | head -n 1 | awk '{print $2}')
 
-# Distributed configuration
 NUM_NODES=$SLURM_NNODES
-GPUS_PER_NODE=8
+GPUS_PER_NODE=4
 WORLD_SIZE=$(($NUM_NODES*$GPUS_PER_NODE))
 NODELIST=($(scontrol show hostnames $SLURM_JOB_NODELIST))
 MASTER_ADDR=${NODELIST[0]}  # First node for main process
@@ -130,7 +129,7 @@ if [[ "$USE_VLLM" == "true" ]]; then
 fi
 
 # force crashing on nccl issues like hanging broadcast
-export NCCL_ASYNC_ERROR_HANDLING=1
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 # export NCCL_DEBUG=INFO
 # export NCCL_DEBUG_SUBSYS=COLL
 # export NCCL_SOCKET_NTHREADS=1
@@ -142,7 +141,7 @@ export CMD=" \
     "
 
 export LAUNCHER="ACCELERATE_LOG_LEVEL=info TRANSFORMERS_VERBOSITY=info accelerate launch \
-    --config_file recipes/accelerate_configs/$ACCELERATOR.yaml  \
+    --config_file recipes/accelerate/$ACCELERATOR.yaml  \
     --gradient_accumulation_steps $GRAD_ACC_STEPS \
     --num_machines $NUM_NODES \
     --num_processes $WORLD_SIZE \
