@@ -40,8 +40,8 @@ class PistonClient:
     export PISTON_REPO_URL=https://github.com/guipenedo/piston/releases/download/pkgs/index
     mkdir /piston
 
-    sed -i '/app.use(body_parser.urlencoded/c\    app.use(body_parser.urlencoded({ extended: true, limit: \"512mb\" }));' src/index.js
-    sed -i '/app.use(body_parser.json/c\    app.use(body_parser.json({ limit: \"512mb\" }));' src/index.js
+    sed -i '/app.use(body_parser.urlencoded/c\\    app.use(body_parser.urlencoded({ extended: true, limit: \"512mb\" }));' src/index.js
+    sed -i '/app.use(body_parser.json/c\\    app.use(body_parser.json({ limit: \"512mb\" }));' src/index.js
 
     # Start server in background
     node src```
