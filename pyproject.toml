@@ -6,5 +6,8 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.6.0",
+    "latex2sympy2-extended>=1.10.1",
+    "math-verify>=0.7.0",
     "torch>=2.7.0",
+    "wandb>=0.19.10",
 ]
