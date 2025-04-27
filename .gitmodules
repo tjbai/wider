@@ -1,0 +1,6 @@
+[submodule "trl"]
+	path = trl
+	url = https://github.com/tjbai/trl
+[submodule "transformers"]
+	path = transformers
+	url = https://github.com/tjbai/transformers
