@@ -106,7 +106,7 @@ class ChoreoQwen(Qwen2ForCausalLM):
         else:
             is_prefill = True
 
-        # track 2d finished sequences now
+        # NOTE -- track 2d finished sequences now
         batch_size, prompt_len = input_ids.shape
         this_peer_finished = False
         model_kwargs = self._get_initial_cache_position(input_ids, model_kwargs)
@@ -114,12 +114,14 @@ class ChoreoQwen(Qwen2ForCausalLM):
 
         dtype = self.dtype
         min_dtype = torch.finfo(dtype).min
-        base_mask = torch.full(
-            (k, prompt_len),
-            fill_value=0, dtype=dtype, device=device,
-        )
+        base_mask = torch.full((batch_size, prompt_len), fill_value=0, dtype=dtype, device=device)
+        base_mask[input_ids == pad_token_id] = min_dtype
+        base_mask = base_mask.unsqueeze(1).unsqueeze(2).expand(-1, -1, k, -1) # (batch_size, prompt_len) -> (batch_size, 1, k, prompt_len)
+        position_ids = torch.cumsum(input_ids != pad_token_id, dim=1)[:, -1:].expand(-1, k)
+
         diag = torch.full((k, k), fill_value=min_dtype, dtype=dtype, device=device)
         diag.fill_diagonal_(0)
+        diag = diag.unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
 
         cur_len = prompt_len
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
@@ -127,22 +129,13 @@ class ChoreoQwen(Qwen2ForCausalLM):
             model_inputs.update({"output_attentions": output_attentions} if output_attentions else {})
             model_inputs.update({"output_hidden_states": output_hidden_states} if output_hidden_states else {})
 
-            if is_prefill:
-                outputs = self(**model_inputs, return_dict=True)
-            else:
-                outputs = model_forward(**model_inputs, return_dict=True)
+            # TODO -- not handling compilation
+            outputs = self(**model_inputs, return_dict=True)
 
             model_kwargs['past_key_values'] = outputs['past_key_values']
             model_kwargs['cache_position'] = torch.arange(model_kwargs['cache_position'][-1] + 1, model_kwargs['cache_position'][-1] + k + 1, dtype=torch.long, device=device)
-
-            # TODO -- this needs to account for prompt padding (just precompute cumsum from initial attention mask)
-            model_kwargs['position_ids'] = torch.full((batch_size, k), fill_value=cur_len, device=device)
-
-            # TODO -- make this more efficient
-            model_kwargs['attention_mask'] = torch.cat((
-                base_mask,
-                diag.repeat(1, cur_len + 1)
-            ), dim=1).unsqueeze(0).unsqueeze(0).expand(batch_size, 1, k, -1)
+            model_kwargs['position_ids'] = position_ids if is_prefill else model_kwargs['position_ids'] + 1
+            model_kwargs['attention_mask'] = torch.cat((base_mask, diag.repeat(1, 1, 1, cur_len + 1)), dim=1)
 
             if synced_gpus and this_peer_finished:
                 continue
@@ -150,12 +143,10 @@ class ChoreoQwen(Qwen2ForCausalLM):
             if is_prefill:
                 next_token_logits = outputs.logits[:, -1:, :].to(copy=True, dtype=torch.float32, device=input_ids.device).expand(batch_size, k, -1)
                 next_token_scores = logits_processor(input_ids, next_token_logits)
-                next_token_scores = next_token_logits
                 is_prefill = False
             else:
                 next_token_logits = outputs.logits[:, -k:, :].to(copy=True, dtype=torch.float32, device=input_ids.device)
                 next_token_scores = logits_processor(input_ids, next_token_logits)
-                next_token_scores = next_token_logits
 
             if return_dict_in_generate:
                 if output_scores:
