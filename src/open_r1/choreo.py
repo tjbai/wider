@@ -3,7 +3,7 @@ import json
 import inspect
 import logging
 import warnings
-from typing import Optional, Union, Callable, List
+from typing import Optional, Union, Callable, List, Dict
 
 import torch
 import torch.nn.functional as F
@@ -12,8 +12,10 @@ from transformers.utils.generic import ExplicitEnum
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 from transformers.integrations.fsdp import is_fsdp_managed_module
 from transformers.generation.streamers import BaseStreamer
+from transformers.generation.logits_process import TopPLogitsWarper, TemperatureLogitsWarper
 from transformers import (
     Qwen2ForCausalLM,
+    Qwen2Tokenizer,
     LogitsProcessorList,
     StoppingCriteriaList,
     GenerationConfig,
@@ -49,7 +51,13 @@ class GenerationMode(ExplicitEnum):
     CONSTRAINED_BEAM_SEARCH = "constrained_beam_search"
     GROUP_BEAM_SEARCH = "group_beam_search"
 
-class ChoreographedQwen(Qwen2ForCausalLM):
+class ChoreoTokenizer(Qwen2Tokenizer):
+    def parse_interleaved(self, inputs: Dict, output_ids: torch.Tensor, choreography_k: int):
+        return [self.decode(
+            output_ids[:, inputs['input_ids'].shape[1]:].squeeze().reshape(-1, choreography_k).T[i]
+        ) for i in range(choreography_k)]
+
+class ChoreoQwen(Qwen2ForCausalLM):
     def _choreographed_sample(
         self,
         input_ids: torch.LongTensor,
@@ -78,11 +86,19 @@ class ChoreographedQwen(Qwen2ForCausalLM):
         decoder_attentions = () if (return_dict_in_generate and output_attentions) else None
         decoder_hidden_states = () if (return_dict_in_generate and output_hidden_states) else None
 
+        logits_processor = LogitsProcessorList([
+            l for l in logits_processor
+            if isinstance(l, (TopPLogitsWarper, TemperatureLogitsWarper))
+        ])
+
         model_forward = self.__call__
+        '''
+        # TODO -- why does this fail
         compile_forward = self._valid_auto_compile_criteria(model_kwargs, generation_config)
         if compile_forward:
             os.environ["TOKENIZERS_PARALLELISM"] = "0"
             model_forward = self.get_compiled_call(generation_config.compile_config)
+        '''
 
         if generation_config.prefill_chunk_size is not None:
             model_kwargs = self._prefill_chunking(input_ids, generation_config, **model_kwargs)
@@ -120,7 +136,7 @@ class ChoreographedQwen(Qwen2ForCausalLM):
             model_kwargs['cache_position'] = torch.arange(model_kwargs['cache_position'][-1] + 1, model_kwargs['cache_position'][-1] + k + 1, dtype=torch.long, device=device)
 
             # TODO -- this needs to account for prompt padding (just precompute cumsum from initial attention mask)
-            model_kwargs['position_ids'] = torch.full((batch_size, k), fill_value=prompt_len + cur_len, device=device)
+            model_kwargs['position_ids'] = torch.full((batch_size, k), fill_value=cur_len, device=device)
 
             # TODO -- make this more efficient
             model_kwargs['attention_mask'] = torch.cat((
@@ -134,10 +150,12 @@ class ChoreographedQwen(Qwen2ForCausalLM):
             if is_prefill:
                 next_token_logits = outputs.logits[:, -1:, :].to(copy=True, dtype=torch.float32, device=input_ids.device).expand(batch_size, k, -1)
                 next_token_scores = logits_processor(input_ids, next_token_logits)
+                next_token_scores = next_token_logits
                 is_prefill = False
             else:
                 next_token_logits = outputs.logits[:, -k:, :].to(copy=True, dtype=torch.float32, device=input_ids.device)
                 next_token_scores = logits_processor(input_ids, next_token_logits)
+                next_token_scores = next_token_logits
 
             if return_dict_in_generate:
                 if output_scores:
@@ -336,7 +354,8 @@ class ChoreographedQwen(Qwen2ForCausalLM):
 
         # 8. determine generation mode
         generation_mode = generation_config.get_generation_mode(assistant_model)
-        if choreography_k and choreography_k > 1:
+        # if choreography_k and choreography_k >= 1:
+        if choreography_k: # TODO -- fix
             generation_mode = GenerationMode.CHOREOGRAPHED_SAMPLE
 
         if streamer is not None and (generation_config.num_beams > 1):
@@ -473,13 +492,15 @@ class ChoreographedQwen(Qwen2ForCausalLM):
                 **model_kwargs,
             )
 
-        elif generation_mode in (GenerationMode.CHOREOGAPHED_SAMPLE):
+        elif generation_mode in (GenerationMode.CHOREOGRAPHED_SAMPLE):
             input_ids, model_kwargs = self._expand_inputs_for_generation(
                 input_ids=input_ids,
                 expand_size=generation_config.num_return_sequences,
                 is_encoder_decoder=self.config.is_encoder_decoder,
                 **model_kwargs,
             )
+
+            model_kwargs['logits_to_keep'] = choreography_k # important!
 
             result = self._choreographed_sample(
                 input_ids,
