@@ -61,6 +61,7 @@ class ChoreographedQwen(Qwen2ForCausalLM):
         k: int = 1,
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
+        device = self.device
         eos_token_id = 151643
         pad_token_id = 151643
 
@@ -99,9 +100,9 @@ class ChoreographedQwen(Qwen2ForCausalLM):
         min_dtype = torch.finfo(dtype).min
         base_mask = torch.full(
             (k, prompt_len),
-            fill_value=0, dtype=dtype, device='cpu',
+            fill_value=0, dtype=dtype, device=device,
         )
-        diag = torch.full((k, k), fill_value=min_dtype, dtype=dtype, device='cpu')
+        diag = torch.full((k, k), fill_value=min_dtype, dtype=dtype, device=device)
         diag.fill_diagonal_(0)
 
         cur_len = prompt_len
@@ -116,10 +117,10 @@ class ChoreographedQwen(Qwen2ForCausalLM):
                 outputs = model_forward(**model_inputs, return_dict=True)
 
             model_kwargs['past_key_values'] = outputs['past_key_values']
-            model_kwargs['cache_position'] = torch.arange(model_kwargs['cache_position'][-1] + 1, model_kwargs['cache_position'][-1] + k + 1, dtype=torch.long, device='cpu')
+            model_kwargs['cache_position'] = torch.arange(model_kwargs['cache_position'][-1] + 1, model_kwargs['cache_position'][-1] + k + 1, dtype=torch.long, device=device)
 
             # TODO -- this needs to account for prompt padding (just precompute cumsum from initial attention mask)
-            model_kwargs['position_ids'] = torch.full((batch_size, k), fill_value=prompt_len + cur_len, device='cpu')
+            model_kwargs['position_ids'] = torch.full((batch_size, k), fill_value=prompt_len + cur_len, device=device)
 
             # TODO -- make this more efficient
             model_kwargs['attention_mask'] = torch.cat((
