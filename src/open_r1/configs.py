@@ -13,13 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
 from typing import Optional
+from dataclasses import dataclass, field
 
 import trl
 
-
-# TODO: add the shared options with a mixin to reduce code duplication
 @dataclass
 class GRPOConfig(trl.GRPOConfig):
     """
