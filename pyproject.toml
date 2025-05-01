@@ -10,4 +10,6 @@ dependencies = [
     "datasets>=3.5.0",
     "torch>=2.7.0",
     "wandb>=0.19.10",
+    "ipykernel>=6.29.5",
+    "transformers>=4.51.3",
 ]
