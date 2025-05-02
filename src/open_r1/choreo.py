@@ -1,9 +1,7 @@
-import os
 import json
 import inspect
-import logging
 import warnings
-from typing import Optional, Union, Callable, List, Dict
+from typing import Optional, Union, Callable, List
 
 import torch
 import torch.nn.functional as F
@@ -15,11 +13,9 @@ from transformers.generation.streamers import BaseStreamer
 from transformers.generation.logits_process import TopPLogitsWarper, TemperatureLogitsWarper
 from transformers import (
     Qwen2ForCausalLM,
-    AutoTokenizer,
     LogitsProcessorList,
     StoppingCriteriaList,
     GenerationConfig,
-    DynamicCache,
     PreTrainedModel
 )
 from transformers.generation.utils import (
@@ -28,23 +24,16 @@ from transformers.generation.utils import (
     GenerateOutput
 )
 
-def debug_mask(attention_mask_tensor, head_index=0):
-    if attention_mask_tensor.ndim == 4:
-        if head_index >= attention_mask_tensor.shape[1]:
-            raise RuntimeError(f'invalid head_index {head_index}')
-        masks_to_print = attention_mask_tensor[:, head_index, :, :]
-        print(f"--- Mask Grids (Head {head_index}) ---")
-    elif attention_mask_tensor.ndim == 3:
-        masks_to_print = attention_mask_tensor
-        print("--- Mask Grids ---")
+def debug_mask(mask, head_idx=0):
+    if mask.ndim == 4:
+        if head_idx >= mask.shape[1]:
+            raise RuntimeError(f'invalid head_idx {head_idx}')
+        masks_to_print = mask[:, head_idx, :, :]
+        print(f'--- head {head_idx} ---')
     else:
-        print(f"Error: Unsupported tensor ndim {attention_mask_tensor.ndim}. Expected 3 or 4.")
-        return
-
-    binary_masks = (masks_to_print == 0.0).int().cpu()
-
-    for i, mask in enumerate(binary_masks):
-        print(f"\nBatch Item {i}:")
+        raise RuntimeError(f'expected 3 or 4 dimensions, not {mask.ndim}')
+    for i, mask in enumerate((masks_to_print == 0.).int().cpu()):
+        print(f'\nbatch {i}:')
         for row in mask:
             print(' '.join(map(str, row.tolist())))
     print("--------------------")
@@ -60,6 +49,24 @@ def sample_tokens_parallel(probs, generator=None):
     next_token = sample_tokens(probs.view(-1, probs.shape[-1]), generator)
     return next_token.view(probs.shape[0], probs.shape[1])
 
+def parse_interleaved(tokenizer, inputs, output_ids, choreography_k):
+    prompt_len = inputs['input_ids'].shape[1]
+    end_id = tokenizer.convert_tokens_to_ids('<|im_end|>')
+
+    out = []
+    for row in output_ids:
+        gen = row[prompt_len:]
+        columns = gen.reshape(-1, choreography_k).T
+        out.append([
+            tokenizer.decode(
+                col[:(col == end_id).nonzero(as_tuple=True)[0][0]]
+                if (col == end_id).any() else col,
+                skip_special_tokens=True
+            )
+            for col in columns
+        ])
+    return out
+
 class GenerationMode(ExplicitEnum):
     CONTRASTIVE_SEARCH = "contrastive_search"
     GREEDY_SEARCH = "greedy_search"
@@ -72,30 +79,7 @@ class GenerationMode(ExplicitEnum):
     CONSTRAINED_BEAM_SEARCH = "constrained_beam_search"
     GROUP_BEAM_SEARCH = "group_beam_search"
 
-def parse_interleaved(tokenizer, inputs, output_ids, choreography_k):
-    return [tokenizer.decode(
-        output_ids[:, inputs['input_ids'].shape[1]:].squeeze().reshape(-1, choreography_k).T[i]
-    ) for i in range(choreography_k)]
-
-def parse_interleaved(tokenizer, inputs, output_ids, choreography_k):
-    prompt_len = inputs['input_ids'].shape[1]
-    end_id = tokenizer.convert_tokens_to_ids('<|im_end|>')
-
-    out = []
-    for row in output_ids:
-        gen = row[prompt_len:]
-        columns = gen.reshape(-1, choreography_k).T
-        out.append([
-            tokenizer.decode(
-                col[:(col == end_id).nonzero(as_tuple=True)[0][0]]
-                if (col == end_id).any() else col, 
-                skip_special_tokens=True
-            )
-            for col in columns
-        ])
-    return out
-
-class ChoreoQwen(Qwen2ForCausalLM):
+class ChoreographedCausalLM(Qwen2ForCausalLM):
     def _choreographed_sample(
         self,
         input_ids: torch.LongTensor,
@@ -130,7 +114,6 @@ class ChoreoQwen(Qwen2ForCausalLM):
             if isinstance(l, (TopPLogitsWarper, TemperatureLogitsWarper))
         ])
 
-        model_forward = self.__call__
         '''
         # TODO -- why does this fail
         compile_forward = self._valid_auto_compile_criteria(model_kwargs, generation_config)
@@ -160,7 +143,7 @@ class ChoreoQwen(Qwen2ForCausalLM):
         diag = torch.full((k, k), fill_value=min_dtype, dtype=dtype, device=device)
         diag.fill_diagonal_(0)
         diag = diag.unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
-        
+
         # this is important lol. set the initial attention mask for prefilling.
         model_kwargs['attention_mask'] = torch.where(input_ids == pad_token_id, 0, 1)
 
@@ -207,7 +190,6 @@ class ChoreoQwen(Qwen2ForCausalLM):
                         else (outputs.hidden_states,)
                     )
 
-            # NOTE -- updated
             if do_sample:
                 probs = F.softmax(next_token_scores, dim=-1)
                 next_tokens = sample_tokens_parallel(probs)
@@ -223,7 +205,6 @@ class ChoreoQwen(Qwen2ForCausalLM):
             if cur_len == stopping_criteria.max_length:
                 this_peer_finished = True
             else:
-                # TODO -- need to test
                 unfinished_sequences = unfinished_sequences & ~(next_tokens == eos_token_id)
                 this_peer_finished = unfinished_sequences.max() == 0
 
@@ -245,6 +226,7 @@ class ChoreoQwen(Qwen2ForCausalLM):
         else:
             return input_ids
 
+    # this is just a direct copy with an added branch to dispatch _choreographed_sample
     @torch.no_grad()
     def generate(
         self,
