@@ -15,7 +15,7 @@ from transformers.generation.streamers import BaseStreamer
 from transformers.generation.logits_process import TopPLogitsWarper, TemperatureLogitsWarper
 from transformers import (
     Qwen2ForCausalLM,
-    Qwen2Tokenizer,
+    AutoTokenizer,
     LogitsProcessorList,
     StoppingCriteriaList,
     GenerationConfig,
@@ -27,6 +27,27 @@ from transformers.generation.utils import (
     GenerateNonBeamOutput,
     GenerateOutput
 )
+
+def debug_mask(attention_mask_tensor, head_index=0):
+    if attention_mask_tensor.ndim == 4:
+        if head_index >= attention_mask_tensor.shape[1]:
+            raise RuntimeError(f'invalid head_index {head_index}')
+        masks_to_print = attention_mask_tensor[:, head_index, :, :]
+        print(f"--- Mask Grids (Head {head_index}) ---")
+    elif attention_mask_tensor.ndim == 3:
+        masks_to_print = attention_mask_tensor
+        print("--- Mask Grids ---")
+    else:
+        print(f"Error: Unsupported tensor ndim {attention_mask_tensor.ndim}. Expected 3 or 4.")
+        return
+
+    binary_masks = (masks_to_print == 0.0).int().cpu()
+
+    for i, mask in enumerate(binary_masks):
+        print(f"\nBatch Item {i}:")
+        for row in mask:
+            print(' '.join(map(str, row.tolist())))
+    print("--------------------")
 
 def debug(d):
     return json.dumps({k: str(v) for k, v in d.items()}, indent=2)
@@ -51,11 +72,28 @@ class GenerationMode(ExplicitEnum):
     CONSTRAINED_BEAM_SEARCH = "constrained_beam_search"
     GROUP_BEAM_SEARCH = "group_beam_search"
 
-class ChoreoTokenizer(Qwen2Tokenizer):
-    def parse_interleaved(self, inputs: Dict, output_ids: torch.Tensor, choreography_k: int):
-        return [self.decode(
-            output_ids[:, inputs['input_ids'].shape[1]:].squeeze().reshape(-1, choreography_k).T[i]
-        ) for i in range(choreography_k)]
+def parse_interleaved(tokenizer, inputs, output_ids, choreography_k):
+    return [tokenizer.decode(
+        output_ids[:, inputs['input_ids'].shape[1]:].squeeze().reshape(-1, choreography_k).T[i]
+    ) for i in range(choreography_k)]
+
+def parse_interleaved(tokenizer, inputs, output_ids, choreography_k):
+    prompt_len = inputs['input_ids'].shape[1]
+    end_id = tokenizer.convert_tokens_to_ids('<|im_end|>')
+
+    out = []
+    for row in output_ids:
+        gen = row[prompt_len:]
+        columns = gen.reshape(-1, choreography_k).T
+        out.append([
+            tokenizer.decode(
+                col[:(col == end_id).nonzero(as_tuple=True)[0][0]]
+                if (col == end_id).any() else col, 
+                skip_special_tokens=True
+            )
+            for col in columns
+        ])
+    return out
 
 class ChoreoQwen(Qwen2ForCausalLM):
     def _choreographed_sample(
@@ -70,7 +108,8 @@ class ChoreoQwen(Qwen2ForCausalLM):
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
         device = self.device
-        eos_token_id = 151643
+        # eos_token_id = 151643   # <|endoftext|>
+        eos_token_id = 151645     # <|im_end|>
         pad_token_id = 151643
 
         output_attentions = generation_config.output_attentions
@@ -106,7 +145,6 @@ class ChoreoQwen(Qwen2ForCausalLM):
         else:
             is_prefill = True
 
-        # NOTE -- track 2d finished sequences now
         batch_size, prompt_len = input_ids.shape
         this_peer_finished = False
         model_kwargs = self._get_initial_cache_position(input_ids, model_kwargs)
@@ -122,6 +160,9 @@ class ChoreoQwen(Qwen2ForCausalLM):
         diag = torch.full((k, k), fill_value=min_dtype, dtype=dtype, device=device)
         diag.fill_diagonal_(0)
         diag = diag.unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
+        
+        # this is important lol. set the initial attention mask for prefilling.
+        model_kwargs['attention_mask'] = torch.where(input_ids == pad_token_id, 0, 1)
 
         cur_len = prompt_len
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
@@ -135,7 +176,7 @@ class ChoreoQwen(Qwen2ForCausalLM):
             model_kwargs['past_key_values'] = outputs['past_key_values']
             model_kwargs['cache_position'] = torch.arange(model_kwargs['cache_position'][-1] + 1, model_kwargs['cache_position'][-1] + k + 1, dtype=torch.long, device=device)
             model_kwargs['position_ids'] = position_ids if is_prefill else model_kwargs['position_ids'] + 1
-            model_kwargs['attention_mask'] = torch.cat((base_mask, diag.repeat(1, 1, 1, cur_len + 1)), dim=1)
+            model_kwargs['attention_mask'] = torch.cat((base_mask, diag.repeat(1, 1, 1, cur_len - prompt_len + 1)), dim=-1)
 
             if synced_gpus and this_peer_finished:
                 continue
@@ -175,12 +216,10 @@ class ChoreoQwen(Qwen2ForCausalLM):
 
             next_tokens[~unfinished_sequences] = pad_token_id
 
-            # NOTE -- updated
             input_ids = torch.cat([input_ids, next_tokens], dim=-1)
             if streamer is not None:
                 streamer.put(next_tokens.cpu())
 
-            # NOTE -- updated
             if cur_len == stopping_criteria.max_length:
                 this_peer_finished = True
             else:
