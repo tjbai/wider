@@ -30,7 +30,7 @@ from huggingface_hub import (
     repo_exists,
     upload_folder,
 )
-from trl import GRPOConfig, SFTConfig
+from trl.trainer import GRPOConfig, SFTConfig
 
 
 logger = logging.getLogger(__name__)

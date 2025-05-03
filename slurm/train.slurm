@@ -1,9 +1,14 @@
 #!/bin/bash
+#SBATCH -A m4789_g
+#SBATCH -C gpu
+#SBATCH -q regular
+#SBATCH -N 1
+#SBATCH -t 1:00:00
+#SBATCH --ntasks-per-node=4
 #SBATCH --job-name=open_r1
 #SBATCH --ntasks-per-node=1
 #SBATCH --exclusive
 #SBATCH --gres=gpu:4
-#SBATCH --partition=gpu
 #SBATCH --output=./logs/%x-%j.out
 #SBATCH --error=./logs/%x-%j.err
 #SBATCH --requeue
@@ -30,7 +35,6 @@ source .venv/bin/activate
 START_TIME=$(date +%s)
 echo "START TIME: $(date)"
 
-# Default values
 MODEL=""
 TASK=""
 CONFIG_SUFFIX=""
@@ -39,7 +43,6 @@ DP=1
 TP=1
 OPTIONAL_ARGS=""
 
-# Parse command line arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
     --model)
@@ -78,7 +81,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Validate required arguments
 if [[ -z "$MODEL" || -z "$TASK" || -z "$CONFIG_SUFFIX" || -z "$ACCELERATOR" ]]; then
   echo "Error: Missing required arguments"
   echo "Run with --help for usage information"
@@ -89,14 +91,11 @@ fi
 CONFIG_FILE=recipes/$MODEL/$TASK/config_$CONFIG_SUFFIX.yaml
 GRAD_ACC_STEPS=$(grep 'gradient_accumulation_steps' $CONFIG_FILE | awk '{print $2}')
 
-# Split the string into individual arguments
 IFS=' ' read -ra ARGS <<< "$OPTIONAL_ARGS"
-# Loop through the arguments and find the one with "--gradient_accumulation_steps"
 for arg in "${ARGS[@]}"; do
     if [[ "$arg" == "--gradient_accumulation_steps="* ]]; then
-        # Extract the value after the equals sign
         GRAD_ACC_STEPS="${arg#*=}"
-        break  # Exit the loop once we find the desired argument
+        break
     fi
 done
 
@@ -109,7 +108,7 @@ NUM_NODES=$SLURM_NNODES
 GPUS_PER_NODE=4
 WORLD_SIZE=$(($NUM_NODES*$GPUS_PER_NODE))
 NODELIST=($(scontrol show hostnames $SLURM_JOB_NODELIST))
-MASTER_ADDR=${NODELIST[0]}  # First node for main process
+MASTER_ADDR=${NODELIST[0]}
 MASTER_PORT=6000
 TRAIN_NODES=("${NODELIST[@]}")
 
@@ -128,7 +127,6 @@ if [[ "$USE_VLLM" == "true" ]]; then
      OPTIONAL_ARGS="$OPTIONAL_ARGS --vllm_server_host=$VLLM_NODE"
 fi
 
-# force crashing on nccl issues like hanging broadcast
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 # export NCCL_DEBUG=INFO
 # export NCCL_DEBUG_SUBSYS=COLL
@@ -136,11 +134,14 @@ export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 # export NCCL_NSOCKS_PERTHREAD=1
 # export CUDA_LAUNCH_BLOCKING=1
 
+export HF_DATASETS_CACHE=/tmp/$USER/hf_dataset_cache
+mkdir -p $HF_DATASETS_CACHE
+
 export CMD=" \
     src/open_r1/$TASK.py --config $CONFIG_FILE $OPTIONAL_ARGS
     "
 
-export LAUNCHER="ACCELERATE_LOG_LEVEL=debug TRANSFORMERS_VERBOSITY=debug accelerate launch \
+export LAUNCHER="ACCELERATE_LOG_LEVEL=info TRANSFORMERS_VERBOSITY=info uv run accelerate launch \
     --config_file recipes/accelerate/$ACCELERATOR.yaml  \
     --gradient_accumulation_steps $GRAD_ACC_STEPS \
     --num_machines $NUM_NODES \
@@ -152,9 +153,7 @@ export LAUNCHER="ACCELERATE_LOG_LEVEL=debug TRANSFORMERS_VERBOSITY=debug acceler
     --max_restarts 1 \
     --tee 3 \
     "
-# srun error handling:
-# --wait=60: wait 60 sec after the first task terminates before terminating all remaining tasks
-# --kill-on-bad-exit=1: terminate a step if any task exits with a non-zero exit code
+
 NODELIST=$(IFS=,; echo "${TRAIN_NODES[*]}")
 
 SRUN_ARGS=" \
@@ -164,7 +163,9 @@ SRUN_ARGS=" \
     --ntasks=$NUM_NODES \
     --nodelist=$NODELIST
     "
-clear; srun $SRUN_ARGS bash -c "$LAUNCHER $CMD" 2>&1
+
+clear
+srun $SRUN_ARGS bash -c "$LAUNCHER $CMD" 2>&1
 
 END_TIME=$(date +%s)
 echo "END TIME: $(date)"

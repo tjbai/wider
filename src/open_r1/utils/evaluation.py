@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING, Dict, Union
 
 from .hub import get_gpu_count_for_vllm
 
-
 if TYPE_CHECKING:
     from trl import GRPOConfig, SFTConfig, ModelConfig
 

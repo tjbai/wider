@@ -15,23 +15,28 @@
 import logging
 import os
 import sys
+from typing import Optional
 
 import datasets
 import transformers
 from datasets import load_dataset
-from transformers import set_seed
+from transformers import set_seed, HfArgumentParser
 from transformers.trainer_utils import get_last_checkpoint
+from transformers.hf_argparser import DataClass, DataClassType
 
 from open_r1.configs import GRPOConfig, GRPOScriptArguments
 from open_r1.rewards import get_reward_funcs
 from open_r1.utils import get_model, get_tokenizer
 from open_r1.utils.callbacks import get_callbacks
 from open_r1.utils.wandb_logging import init_wandb_training
-from trl import GRPOTrainer, ModelConfig, TrlParser, get_peft_config
-
+from trl.trainer import GRPOTrainer, ModelConfig
+from trl.trainer.configs import get_peft_config
 
 logger = logging.getLogger(__name__)
 
+# TODO -- implementation copied from `trl` because of import problems...
+class TrlParser(HfArgumentParser):
+    pass
 
 def main(script_args, training_args, model_args):
     # Set seed for reproducibility
@@ -72,7 +77,8 @@ def main(script_args, training_args, model_args):
         init_wandb_training(training_args)
 
     # Load the dataset
-    dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
+    # dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
+    dataset = load_dataset(script_args.dataset_name)
 
     ################
     # Load tokenizer
