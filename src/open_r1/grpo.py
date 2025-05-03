@@ -31,7 +31,7 @@ from open_r1.utils import get_model, get_tokenizer
 from open_r1.utils.callbacks import get_callbacks
 from open_r1.utils.wandb_logging import init_wandb_training
 from trl.trainer import GRPOTrainer, ModelConfig
-from trl.trainer.configs import get_peft_config
+# from trl.trainer.configs import get_peft_config
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +178,7 @@ def main(script_args, training_args, model_args):
         args=training_args,
         train_dataset=dataset[script_args.dataset_train_split],
         eval_dataset=dataset[script_args.dataset_test_split] if training_args.eval_strategy != "no" else None,
-        peft_config=get_peft_config(model_args),
+        # peft_config=get_peft_config(model_args),
         callbacks=get_callbacks(training_args, model_args),
         processing_class=tokenizer,
     )

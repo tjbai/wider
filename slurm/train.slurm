@@ -141,7 +141,7 @@ export CMD=" \
     src/open_r1/$TASK.py --config $CONFIG_FILE $OPTIONAL_ARGS
     "
 
-export LAUNCHER="ACCELERATE_LOG_LEVEL=info TRANSFORMERS_VERBOSITY=info uv run accelerate launch \
+export LAUNCHER="ACCELERATE_LOG_LEVEL=info TRANSFORMERS_VERBOSITY=info accelerate launch \
     --config_file recipes/accelerate/$ACCELERATOR.yaml  \
     --gradient_accumulation_steps $GRAD_ACC_STEPS \
     --num_machines $NUM_NODES \
