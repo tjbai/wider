@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 import os
 import sys
-from typing import Optional
+import yaml
+import logging
+from typing import Optional, Union, Iterable
 
 import datasets
 import transformers
@@ -34,9 +35,64 @@ from trl.trainer.configs import get_peft_config
 
 logger = logging.getLogger(__name__)
 
-# TODO -- implementation copied from `trl` because of import problems...
+# TODO -- copied from `trl` bc of import frunking
 class TrlParser(HfArgumentParser):
-    pass
+    def __init__(
+        self,
+        dataclass_types: Optional[Union[DataClassType, Iterable[DataClassType]]] = None,
+        **kwargs,
+    ):
+        if dataclass_types is None:
+            dataclass_types = []
+        elif not isinstance(dataclass_types, Iterable):
+            dataclass_types = [dataclass_types]
+
+        for dataclass_type in dataclass_types:
+            if "config" in dataclass_type.__dataclass_fields__:
+                raise ValueError(
+                    f"Dataclass {dataclass_type.__name__} has a field named 'config'. This field is reserved for the "
+                    f"config file path and should not be used in the dataclass."
+                )
+
+        super().__init__(dataclass_types=dataclass_types, **kwargs)
+
+    def parse_args_and_config(
+        self, args: Optional[Iterable[str]] = None, return_remaining_strings: bool = False
+    ) -> tuple[DataClass, ...]:
+        args = list(args) if args is not None else sys.argv[1:]
+        if "--config" in args:
+            config_index = args.index("--config")
+            args.pop(config_index)  # remove the --config flag
+            config_path = args.pop(config_index)  # get the path to the config file
+            with open(config_path) as yaml_file:
+                config = yaml.safe_load(yaml_file)
+
+            if "env" in config:
+                env_vars = config.pop("env", {})
+                if not isinstance(env_vars, dict):
+                    raise ValueError("`env` field should be a dict in the YAML file.")
+                for key, value in env_vars.items():
+                    os.environ[key] = str(value)
+
+            config_remaining_strings = self.set_defaults_with_config(**config)
+        else:
+            config_remaining_strings = []
+
+        output = self.parse_args_into_dataclasses(args=args, return_remaining_strings=return_remaining_strings)
+
+        if return_remaining_strings:
+            args_remaining_strings = output[-1]
+            return output[:-1] + (config_remaining_strings + args_remaining_strings,)
+        else:
+            return output
+
+    def set_defaults_with_config(self, **kwargs) -> list[str]:
+        for action in self._actions:
+            if action.dest in kwargs:
+                action.default = kwargs.pop(action.dest)
+                action.required = False
+        remaining_strings = [item for key, value in kwargs.items() for item in [f"--{key}", str(value)]]
+        return remaining_strings
 
 def main(script_args, training_args, model_args):
     # Set seed for reproducibility
