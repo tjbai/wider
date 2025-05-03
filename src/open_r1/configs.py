@@ -17,9 +17,10 @@ from typing import Optional
 from dataclasses import dataclass, field
 
 import trl
+from trl.trainer import GRPOConfig as TrlGRPOConfig, SFTConfig as TrlSFTConfig
 
 @dataclass
-class GRPOConfig(trl.GRPOConfig):
+class GRPOConfig(TrlGRPOConfig):
     """
     args for callbacks, benchmarks etc
     """
@@ -55,7 +56,7 @@ class GRPOConfig(trl.GRPOConfig):
 
 
 @dataclass
-class SFTConfig(trl.SFTConfig):
+class SFTConfig(TrlSFTConfig):
     """
     args for callbacks, benchmarks etc
     """
@@ -90,9 +91,52 @@ class SFTConfig(trl.SFTConfig):
         metadata={"help": ("The group to store runs under.")},
     )
 
+@dataclass
+class ScriptArguments:
+    """
+    Arguments common to all scripts.
+
+    Args:
+        dataset_name (`str`):
+            Dataset name.
+        dataset_config (`str` or `None`, *optional*, defaults to `None`):
+            Dataset configuration name. Corresponds to the `name` argument of the [`~datasets.load_dataset`] function.
+        dataset_train_split (`str`, *optional*, defaults to `"train"`):
+            Dataset split to use for training.
+        dataset_test_split (`str`, *optional*, defaults to `"test"`):
+            Dataset split to use for evaluation.
+        gradient_checkpointing_use_reentrant (`bool`, *optional*, defaults to `False`):
+            Whether to apply `use_reentrant` for gradient checkpointing.
+        ignore_bias_buffers (`bool`, *optional*, defaults to `False`):
+            Debug argument for distributed training. Fix for DDP issues with LM bias/mask buffers - invalid scalar
+            type, inplace operation. See https://github.com/huggingface/transformers/issues/22482#issuecomment-1595790992.
+    """
+
+    dataset_name: str = field(metadata={"help": "Dataset name."})
+    dataset_config: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Dataset configuration name. Corresponds to the `name` argument of the `datasets.load_dataset` "
+            "function."
+        },
+    )
+    dataset_train_split: str = field(default="train", metadata={"help": "Dataset split to use for training."})
+    dataset_test_split: str = field(default="test", metadata={"help": "Dataset split to use for evaluation."})
+    gradient_checkpointing_use_reentrant: bool = field(
+        default=False,
+        metadata={"help": "Whether to apply `use_reentrant` for gradient checkpointing."},
+    )
+    ignore_bias_buffers: bool = field(
+        default=False,
+        metadata={
+            "help": "Debug argument for distributed training. Fix for DDP issues with LM bias/mask buffers - invalid "
+            "scalar type, inplace operation. See "
+            "https://github.com/huggingface/transformers/issues/22482#issuecomment-1595790992."
+        },
+    )
 
 @dataclass
-class GRPOScriptArguments(trl.ScriptArguments):
+class GRPOScriptArguments(ScriptArguments):
     """
     Script arguments for the GRPO training script.
 
