@@ -14,6 +14,8 @@ dependencies = [
     "liger-kernel>=0.5.8 ; sys_platform == 'linux'",
     "deepspeed>=0.16.7 ; sys_platform == 'linux'",
     "accelerate>=1.6.0 ; sys_platform == 'linux'",
+    "lighteval>=0.8.1",
+    "fire>=0.7.0",
 ]
 
 [dependency-groups]
