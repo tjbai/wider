@@ -142,11 +142,11 @@ reward_weights:
   - 1.0
 
 log_level: info
-logging_strategy: "steps"
-logging_steps: 10
+logging_strategy: steps
+logging_steps: 1
 logging_first_step: true
 log_completions: true
-num_completions_to_print: 5
+num_completions_to_print: 1
 
 push_to_hub: true
 hub_model_id: distqwen-1.5B-sanity
