@@ -25,13 +25,13 @@ from transformers import set_seed, HfArgumentParser
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.hf_argparser import DataClass, DataClassType
 from trl.trainer import GRPOTrainer
+from peft import LoraConfig, PeftConfig
 
 from open_r1.configs import GRPOConfig, GRPOScriptArguments, ModelConfig
 from open_r1.rewards import get_reward_funcs
 from open_r1.utils import get_model, get_tokenizer
 from open_r1.utils.callbacks import get_callbacks
 from open_r1.utils.wandb_logging import init_wandb_training
-# from trl.trainer.configs import get_peft_config
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,24 @@ class TrlParser(HfArgumentParser):
                 action.required = False
         remaining_strings = [item for key, value in kwargs.items() for item in [f"--{key}", str(value)]]
         return remaining_strings
+
+def get_peft_config(model_args: ModelConfig) -> Optional[PeftConfig]:
+    if model_args.use_peft is False:
+        return None
+
+    peft_config = LoraConfig(
+        task_type=model_args.lora_task_type,
+        r=model_args.lora_r,
+        target_modules=model_args.lora_target_modules,
+        lora_alpha=model_args.lora_alpha,
+        lora_dropout=model_args.lora_dropout,
+        bias="none",
+        use_rslora=model_args.use_rslora,
+        use_dora=model_args.use_dora,
+        modules_to_save=model_args.lora_modules_to_save,
+    )
+
+    return peft_config
 
 def main(script_args, training_args, model_args):
     # Set seed for reproducibility
