@@ -6,6 +6,9 @@ bf16: true
 use_vllm: false
 use_liger_kernel: true
 
+to_choreo: true
+choreo_k: 1
+
 # the holy seed
 seed: 42
 
@@ -157,4 +160,3 @@ save_total_limit: 1
 report_to:
   - wandb
 wandb_project: rlfun
-

@@ -1,11 +1,10 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizer
 
-from trl.trainer import ModelConfig
 from trl.trainer.utils import get_kbit_device_map, get_quantization_config
 
-from ..configs import GRPOConfig, SFTConfig
-
+from ..configs import GRPOConfig, SFTConfig, ModelConfig
+from ..choreo import ChoreographedCausalLM
 
 def get_tokenizer(model_args: ModelConfig, training_args: SFTConfig | GRPOConfig) -> PreTrainedTokenizer:
     """Get the tokenizer for the model."""
@@ -20,11 +19,15 @@ def get_tokenizer(model_args: ModelConfig, training_args: SFTConfig | GRPOConfig
 
     return tokenizer
 
-
-def get_model(model_args: ModelConfig, training_args: SFTConfig | GRPOConfig) -> AutoModelForCausalLM:
-    """Get the model"""
+def get_model(
+    model_args: ModelConfig,
+    training_args: SFTConfig | GRPOConfig,
+) -> AutoModelForCausalLM:
+    model_cls = ChoreographedCausalLM if model_args.to_choreo else AutoModelForCausalLM
     torch_dtype = (
-        model_args.torch_dtype if model_args.torch_dtype in ["auto", None] else getattr(torch, model_args.torch_dtype)
+        model_args.torch_dtype
+        if model_args.torch_dtype in ["auto", None]
+        else getattr(torch, model_args.torch_dtype)
     )
     quantization_config = get_quantization_config(model_args)
     model_kwargs = dict(
@@ -35,8 +38,9 @@ def get_model(model_args: ModelConfig, training_args: SFTConfig | GRPOConfig) ->
         use_cache=False if training_args.gradient_checkpointing else True,
         device_map=get_kbit_device_map() if quantization_config is not None else None,
         quantization_config=quantization_config,
+        choreography_k=model_args.choreography_k,
     )
-    model = AutoModelForCausalLM.from_pretrained(
+    model = model_cls.from_pretrained(
         model_args.model_name_or_path,
         **model_kwargs,
     )

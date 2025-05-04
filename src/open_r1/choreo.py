@@ -80,6 +80,13 @@ class GenerationMode(ExplicitEnum):
     GROUP_BEAM_SEARCH = "group_beam_search"
 
 class ChoreographedCausalLM(Qwen2ForCausalLM):
+
+    @classmethod
+    def from_pretrained(cls, *args, choreography_k=1, **kwargs):
+        model = super().from_pretrained(*args, **kwargs)
+        model.choreography_k = choreography_k
+        return model
+
     def _choreographed_sample(
         self,
         input_ids: torch.LongTensor,
@@ -241,7 +248,6 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
         negative_prompt_ids: Optional[torch.Tensor] = None,
         negative_prompt_attention_mask: Optional[torch.Tensor] = None,
         use_model_defaults: Optional[bool] = None,
-        choreography_k: Optional[int] = None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         # 1. Handle `generation_config` and kwargs that might update it, and validate the `.generate()` call
@@ -366,8 +372,9 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
 
         # 8. determine generation mode
         generation_mode = generation_config.get_generation_mode(assistant_model)
-        # if choreography_k and choreography_k >= 1:
-        if choreography_k: # TODO -- fix
+
+        # choreography!
+        if self.choreography_k and self.choreography_k > 1:
             generation_mode = GenerationMode.CHOREOGRAPHED_SAMPLE
 
         if streamer is not None and (generation_config.num_beams > 1):
@@ -512,7 +519,7 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
                 **model_kwargs,
             )
 
-            model_kwargs['logits_to_keep'] = choreography_k # important!
+            model_kwargs['logits_to_keep'] = self.choreography_k # important!
 
             result = self._choreographed_sample(
                 input_ids,
@@ -521,7 +528,7 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
                 generation_config=generation_config,
                 synced_gpus=synced_gpus,
                 streamer=streamer,
-                k=choreography_k,
+                k=self.choreography_k,
                 **model_kwargs,
             )
 
