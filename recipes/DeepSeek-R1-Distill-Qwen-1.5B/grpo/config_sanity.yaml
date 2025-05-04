@@ -12,7 +12,7 @@ choreo_k: 1
 # the holy seed
 seed: 42
 
-dataset_name: open-r1/OpenR1-Math-220k
+dataset_name: tjbai/OpenR1-Math-100
 dataset_prompt_column: problem
 
 system_prompt: "You are a helpful AI Assistant that provides well-reasoned and detailed responses.
@@ -118,7 +118,7 @@ gradient_accumulation_steps: 8
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: false
-num_train_epochs: 1
+num_train_epochs: 16
 max_steps: -1
 learning_rate: 1e-6
 lr_scheduler:
