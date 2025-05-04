@@ -16,6 +16,7 @@ dependencies = [
     "accelerate>=1.6.0 ; sys_platform == 'linux'",
     "lighteval>=0.8.1",
     "fire>=0.7.0",
+    "peft>=0.15.2",
 ]
 
 [dependency-groups]
