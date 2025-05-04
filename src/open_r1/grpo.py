@@ -187,23 +187,17 @@ def main(script_args, training_args, model_args):
         if "messages" in dataset[split].column_names:
             dataset[split] = dataset[split].remove_columns("messages")
 
-    #############################
-    # Initialize the GRPO trainer
-    #############################
     trainer = GRPOTrainer(
         model=model,
         reward_funcs=reward_funcs,
         args=training_args,
         train_dataset=dataset[script_args.dataset_train_split],
         eval_dataset=dataset[script_args.dataset_test_split] if training_args.eval_strategy != "no" else None,
-        # peft_config=get_peft_config(model_args),
+        peft_config=get_peft_config(model_args),
         callbacks=get_callbacks(training_args, model_args),
         processing_class=tokenizer,
     )
 
-    ###############
-    # Training loop
-    ###############
     logger.info("*** Train ***")
     checkpoint = None
     if training_args.resume_from_checkpoint is not None:
@@ -217,27 +211,18 @@ def main(script_args, training_args, model_args):
     trainer.save_metrics("train", metrics)
     trainer.save_state()
 
-    ##################################
-    # Save model and create model card
-    ##################################
-    logger.info("*** Save model ***")
     trainer.save_model(training_args.output_dir)
     logger.info(f"Model saved to {training_args.output_dir}")
 
-    # Save everything else on main process
     kwargs = {
         "dataset_name": script_args.dataset_name,
         "tags": ["open-r1"],
     }
     if trainer.accelerator.is_main_process:
         trainer.create_model_card(**kwargs)
-        # Restore k,v cache for fast inference
         trainer.model.config.use_cache = True
         trainer.model.config.save_pretrained(training_args.output_dir)
 
-    ##########
-    # Evaluate
-    ##########
     if training_args.do_eval:
         logger.info("*** Evaluate ***")
         metrics = trainer.evaluate()
@@ -245,9 +230,6 @@ def main(script_args, training_args, model_args):
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
 
-    #############
-    # push to hub
-    #############
     if training_args.push_to_hub:
         logger.info("Pushing to hub...")
         trainer.push_to_hub(**kwargs)
