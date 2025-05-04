@@ -17,7 +17,12 @@ from typing import Optional
 from dataclasses import dataclass, field
 
 import trl
-from trl.trainer import GRPOConfig as TrlGRPOConfig, SFTConfig as TrlSFTConfig
+from trl.trainer import GRPOConfig as TrlGRPOConfig, SFTConfig as TrlSFTConfig, ModelConfig as TrlModelConfig
+
+@dataclass
+class ModelConfig(TrlModelConfig):
+    to_choreo: bool = False
+    choreography_k: int = 1
 
 @dataclass
 class GRPOConfig(TrlGRPOConfig):
@@ -93,25 +98,6 @@ class SFTConfig(TrlSFTConfig):
 
 @dataclass
 class ScriptArguments:
-    """
-    Arguments common to all scripts.
-
-    Args:
-        dataset_name (`str`):
-            Dataset name.
-        dataset_config (`str` or `None`, *optional*, defaults to `None`):
-            Dataset configuration name. Corresponds to the `name` argument of the [`~datasets.load_dataset`] function.
-        dataset_train_split (`str`, *optional*, defaults to `"train"`):
-            Dataset split to use for training.
-        dataset_test_split (`str`, *optional*, defaults to `"test"`):
-            Dataset split to use for evaluation.
-        gradient_checkpointing_use_reentrant (`bool`, *optional*, defaults to `False`):
-            Whether to apply `use_reentrant` for gradient checkpointing.
-        ignore_bias_buffers (`bool`, *optional*, defaults to `False`):
-            Debug argument for distributed training. Fix for DDP issues with LM bias/mask buffers - invalid scalar
-            type, inplace operation. See https://github.com/huggingface/transformers/issues/22482#issuecomment-1595790992.
-    """
-
     dataset_name: str = field(metadata={"help": "Dataset name."})
     dataset_config: Optional[str] = field(
         default=None,
@@ -137,26 +123,6 @@ class ScriptArguments:
 
 @dataclass
 class GRPOScriptArguments(ScriptArguments):
-    """
-    Script arguments for the GRPO training script.
-
-    Args:
-        reward_funcs (`list[str]`):
-            List of reward functions. Possible values: 'accuracy', 'format', 'reasoning_steps', 'cosine', 'repetition_penalty', 'length', 'tag_count', 'code', 'ioi_code', 'code_format'.
-        cosine_min_value_wrong (`float`):
-            Minimum reward for cosine scaling for wrong answers.
-        cosine_max_value_wrong (`float`):
-            Maximum reward for cosine scaling for wrong answers.
-        cosine_min_value_correct (`float`):
-            Minimum reward for cosine scaling for correct answers.
-        cosine_max_value_correct (`float`):
-            Maximum reward for cosine scaling for correct answers.
-        cosine_max_len (`int`):
-            Maximum length for cosine scaling.
-        code_language (`str`):
-            Language for code format reward.
-    """
-
     reward_funcs: list[str] = field(
         default_factory=lambda: ["accuracy", "format", "tag_count"],
         metadata={
