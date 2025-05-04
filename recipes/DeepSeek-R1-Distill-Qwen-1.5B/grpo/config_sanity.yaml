@@ -152,7 +152,7 @@ push_to_hub: true
 hub_model_id: distqwen-1.5B-sanity
 hub_strategy: every_save
 
-output_dir: data/DeepSeek-R1-Distill-Qwen-1.5B-GRPO
+output_dir: /pscratch/sd/t/tjbai/checkpoints
 overwrite_output_dir: true
 save_strategy: epoch
 save_total_limit: 1
