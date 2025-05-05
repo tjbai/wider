@@ -1,9 +1,15 @@
 #!/bin/bash
-#SBATCH --ntasks=1
-#SBATCH --gres=gpu:4
-#SBATCH --partition=gpu
-#SBATCH --output=./logs/eval_%x-%j.out
-#SBATCH --error=./logs/eval_%x-%j.err
+#SBATCH -A m4789_g
+#SBATCH -C gpu
+#SBATCH -q regular
+#SBATCH -N 1
+#SBATCH -t 12:00:00
+#SBATCH --job-name=open_r1/eval
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:1
+#SBATCH --ntasks-per-node=1
+#SBATCH --output=./logs/%x-%j.out
+#SBATCH --error=./logs/%x-%j.err
 #SBATCH --requeue
 
 set -e

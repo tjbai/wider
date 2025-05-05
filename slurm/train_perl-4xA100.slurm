@@ -5,7 +5,7 @@
 #SBATCH -N 1
 #SBATCH -t 12:00:00
 #SBATCH --ntasks-per-node=4
-#SBATCH --job-name=open_r1
+#SBATCH --job-name=open_r1/train
 #SBATCH --ntasks-per-node=1
 #SBATCH --exclusive
 #SBATCH --gres=gpu:4
