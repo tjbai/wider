@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "math-verify==0.5.2",
+    "math-verify==0.7.0",
     "datasets>=3.5.0",
     "torch>=2.7.0",
     "wandb>=0.19.10",
