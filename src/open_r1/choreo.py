@@ -151,7 +151,7 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
         diag.fill_diagonal_(0)
         diag = diag.unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
 
-        # this is important lol. set the initial attention mask for prefilling.
+        # initial attention mask just for prefilling
         model_kwargs['attention_mask'] = torch.where(input_ids == pad_token_id, 0, 1)
 
         cur_len = prompt_len
