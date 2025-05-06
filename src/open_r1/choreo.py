@@ -8,9 +8,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.attention.flex_attention import BlockMask
+from torch.nn.attention.flex_attention import create_block_mask as create_block_causal_mask_flex
 
 from transformers import Qwen2Model
-from transformers.integrations.flex_attention import make_flex_block_causal_mask
 from transformers.utils.generic import ExplicitEnum
 from transformers.cache_utils import StaticCache, SlidingWindowCache
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
@@ -77,11 +77,56 @@ class GenerationMode(ExplicitEnum):
     CONSTRAINED_BEAM_SEARCH = "constrained_beam_search"
     GROUP_BEAM_SEARCH = "group_beam_search"
 
-class ChoreographedModel(Qwen2Model):
+def make_flex_block_causal_mask(
+    attention_mask_2d: torch.Tensor,
+    attention_chunk_size: Optional[int] = None,
+    query_length=None,
+    key_length=None,
+    offsets: Optional[Tuple[Offset, Offset]] = None,
+) -> BlockMask:
+    batch_size, total_seq_len = attention_mask_2d.shape
+    if not key_length:
+        key_length = total_seq_len
+    if not query_length:
+        query_length = total_seq_len
+    attention_mask_2d = torch.nn.functional.pad(attention_mask_2d, value=0, pad=(0, key_length))
+    device = attention_mask_2d.device
+    document_ids = attention_mask_2d.clone()
 
+    if attention_chunk_size is not None:
+        document_ids = (document_ids.fill_(1).cumsum(-1) - 1) // (attention_chunk_size)
+
+    def causal_mask_mod(batch_idx, head_idx, q_idx, kv_idx):
+        causal_mask = q_idx >= kv_idx
+        document_mask = document_ids[batch_idx, q_idx] == document_ids[batch_idx, kv_idx]
+        padding_mask = attention_mask_2d[batch_idx, q_idx] > 0
+        final_mask = causal_mask & padding_mask & document_mask
+        return final_mask
+
+    if offsets is not None:
+        q_offset = offsets[0]
+        kv_offset = offsets[1]
+
+        def mask_mod(batch_idx, head_idx, q_idx, kv_idx):
+            offset_q = q_idx + q_offset
+            offset_kv = kv_idx + kv_offset
+            return causal_mask_mod(batch_idx, head_idx, offset_q, offset_kv)
+    else:
+        mask_mod = causal_mask_mod
+
+    return create_block_causal_mask_flex(
+        mask_mod=mask_mod,
+        B=batch_size,
+        H=None,  # attention head
+        Q_LEN=query_length,
+        KV_LEN=key_length,
+        device=device,
+        _compile=True,
+    )
+
+class ChoreographedModel(Qwen2Model):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        print('dispatching here')
 
     def _update_causal_mask(
         self,
@@ -198,7 +243,7 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
         device = self.device
 
         eos_token_id = generation_config._eos_token_tensor
-        pad_token_id = eos_token_id # FORCE THESE TO BE THE SAME!!!
+        pad_token_id = generation_config._pad_token_tensor
 
         output_attentions = generation_config.output_attentions
         output_hidden_states = generation_config.output_hidden_states
@@ -299,7 +344,7 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
                 next_tokens = sample_tokens_parallel(probs)
             else:
                 raise NotImplementedError('todo')
-
+            
             next_tokens[~unfinished_sequences] = pad_token_id
 
             input_ids = torch.cat([input_ids, next_tokens], dim=-1)
@@ -309,7 +354,7 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
             if cur_len == stopping_criteria.max_length:
                 this_peer_finished = True
             else:
-                unfinished_sequences = unfinished_sequences & ~(next_tokens == eos_token_id)
+                unfinished_sequences = unfinished_sequences & ~(torch.isin(next_tokens, eos_token_id))
                 this_peer_finished = unfinished_sequences.max() == 0
 
             cur_len += 1
