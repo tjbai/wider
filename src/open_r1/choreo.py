@@ -91,8 +91,8 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
         device = self.device
 
-        pad_token_id = generation_config._pad_token_tensor
         eos_token_id = generation_config._eos_token_tensor
+        pad_token_id = eos_token_id # FORCE THESE TO BE THE SAME!!!
 
         output_attentions = generation_config.output_attentions
         output_hidden_states = generation_config.output_hidden_states
