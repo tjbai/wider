@@ -7,8 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
-from torch.nn.attention.flex_attention import BlockMask
-from torch.nn.attention.flex_attention import create_block_mask as create_block_causal_mask_flex
+from torch.nn.attention.flex_attention import BlockMask, or_masks, create_block_mask
 
 from transformers import Qwen2Model
 from transformers.utils.generic import ExplicitEnum
@@ -79,10 +78,10 @@ class GenerationMode(ExplicitEnum):
 
 def make_flex_block_causal_mask(
     attention_mask_2d: torch.Tensor,
-    attention_chunk_size: Optional[int] = None,
+    attention_chunk_size=None,
     query_length=None,
     key_length=None,
-    offsets: Optional[Tuple[Offset, Offset]] = None,
+    offsets=None,
 ) -> BlockMask:
     batch_size, total_seq_len = attention_mask_2d.shape
     if not key_length:
@@ -214,6 +213,11 @@ class ChoreographedModel(Qwen2Model):
 
         return causal_mask
 
+def get_mask_mod_w_offset(mask_mod, _offset):
+    def _mask_mod(b, h, q, kv):
+        return mask_mod(b, h, q + _offset, kv)
+    return _mask_mod
+
 class ChoreographedCausalLM(Qwen2ForCausalLM):
 
     @classmethod
@@ -295,8 +299,25 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
 
         # initial attention mask just for prefilling
         model_kwargs['attention_mask'] = torch.where(input_ids == pad_token_id, 0, 1)
+        
+        # cur_ids = torch.full((batch_size, 4096), fill_value=pad_token_id, device=device)
+        # cur_ids[:, :input_ids.shape[1]] = input_ids
+
+        prefix_len = prompt_len
+        def prefix_mask(b, h, q_idx, kv_idx):
+            return kv_idx < prefix_len
+            # return (kv_idx < prefix_len) & (~torch.isin(cur_ids[b, kv_idx], pad_token_id))
+
+        def thread_mask(b, h, q_idx, kv_idx):
+            return (q_idx >= prefix_len) & (kv_idx >= prefix_len) & (((q_idx - prefix_len) % 4) == ((kv_idx - prefix_len) % 4))
+
+        block_mask = create_block_causal_mask_flex(
+            or_masks(prefix_mask, thread_mask),
+            B=None, H=None, Q_LEN=2048, KV_LEN=2048,
+        )
 
         cur_len = prompt_len
+        tok_len = prompt_len
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
             model_inputs.update({"output_attentions": output_attentions} if output_attentions else {})
@@ -308,7 +329,14 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
             model_kwargs['past_key_values'] = outputs['past_key_values']
             model_kwargs['cache_position'] = torch.arange(model_kwargs['cache_position'][-1] + 1, model_kwargs['cache_position'][-1] + k + 1, dtype=torch.long, device=device)
             model_kwargs['position_ids'] = position_ids if is_prefill else model_kwargs['position_ids'] + 1
-            model_kwargs['attention_mask'] = torch.cat((base_mask, diag.repeat(1, 1, 1, cur_len - prompt_len + 1)), dim=-1)
+            # model_kwargs['attention_mask'] = torch.cat((base_mask, diag.repeat(1, 1, 1, cur_len - prompt_len + 1)), dim=-1)
+
+            block_offset = cur_len // block_mask.BLOCK_SIZE[0]
+            mask = block_mask[:, :, block_offset]
+            mask.seq_lengths = (self.choreography_k, tok_len + self.choreography_k)
+            tok_len += self.choreography_k
+            # block_mask_slice.mask_mod = get_mask_mod_w_offset(block_mask, cur_len)
+            model_kwargs['attention_mask'] = mask
 
             if synced_gpus and this_peer_finished:
                 continue
