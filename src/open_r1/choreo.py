@@ -50,22 +50,13 @@ def sample_tokens_parallel(probs, generator=None):
     return next_token.view(probs.shape[0], probs.shape[1])
 
 def parse_interleaved(tokenizer, inputs, output_ids, choreography_k):
-    prompt_len = inputs['input_ids'].shape[1]
-    end_id = tokenizer.convert_tokens_to_ids('<|im_end|>')
-
-    out = []
-    for row in output_ids:
-        gen = row[prompt_len:]
-        columns = gen.reshape(-1, choreography_k).T
-        out.append([
-            tokenizer.decode(
-                col[:(col == end_id).nonzero(as_tuple=True)[0][0]]
-                if (col == end_id).any() else col,
-                skip_special_tokens=True
-            )
-            for col in columns
-        ])
-    return out
+    return [
+        tokenizer.batch_decode(
+            row[inputs['input_ids'].shape[1]:].reshape(-1, choreography_k).T,
+            skip_special_tokens=True
+        )
+        for row in output_ids
+    ]
 
 class GenerationMode(ExplicitEnum):
     CONTRASTIVE_SEARCH = "contrastive_search"
