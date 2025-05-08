@@ -1,16 +1,19 @@
+import os
 import warnings
 from typing import Union, Callable, Any, List, Dict
 
 import torch
 import torch.nn as nn
-from torch.nn.attention.flex_attention import create_block_mask, or_masks
+from torch.nn.attention.flex_attention import create_block_mask
 
 from trl.trainer import GRPOTrainer
-from trl.trainer.grpo_trainer import nanstd
+from trl.trainer.grpo_trainer import nanstd, split_tensor_dict
 from trl.models.utils import unwrap_model_for_generation
 from trl.data_utils import maybe_apply_chat_template, is_conversational
 from trl.extras.profiling import profiling_context, profiling_decorator
 from accelerate.utils import gather, gather_object
+
+from .choreo import debug
 
 class ChoreographedTrainer(GRPOTrainer):
 
@@ -75,8 +78,7 @@ class ChoreographedTrainer(GRPOTrainer):
         return inputs
 
     def _generate_and_score_completions(self, inputs) -> Dict:
-        print('dispatching generate and score')
-        print(inputs)
+        DEBUG = os.environ.get('DEBUG') is not None
 
         device = self.accelerator.device
         mode = 'train' if self.model.training else 'eval'
@@ -86,12 +88,10 @@ class ChoreographedTrainer(GRPOTrainer):
         prompt_inputs = self.processing_class(
             text=prompts_text, return_tensors='pt', padding=True, padding_side='left', add_special_tokens=False
         )
-        prompt_inputs = super()._prepare_inputs(prompt_inputs)
+        prompt_inputs = super(GRPOTrainer, self)._prepare_inputs(prompt_inputs)
         prompt_ids, prompt_mask = prompt_inputs['input_ids'], prompt_inputs['attention_mask']
 
-        print('doesnt get here')
-
-        if self.max_prompt_len is not None:
+        if self.max_prompt_length is not None:
             prompt_ids = prompt_ids[:, -self.max_prompt_length :]
             prompt_mask = prompt_mask[:, -self.max_prompt_length :]
 
@@ -103,7 +103,6 @@ class ChoreographedTrainer(GRPOTrainer):
             self.accelerator,
             gather_deepspeed3_params=self.args.ds3_gather_for_generation,
         ) as unwrapped_model:
-            print('starting generate')
             if (was_ckpt := unwrapped_model.is_gradient_checkpointing):
                 unwrapped_model.gradient_checkpointing_disable()
                 unwrapped_model.config.use_cache = True
@@ -118,7 +117,6 @@ class ChoreographedTrainer(GRPOTrainer):
             if was_ckpt:
                 unwrapped_model.gradient_checkpointing_enable()
 
-        print('done generating')
         _, prompt_len = prompt_ids.shape
         prompt_ids = prompt_completion_ids[:, :prompt_len]
         completion_ids = prompt_completion_ids[:, prompt_len:]
@@ -143,25 +141,42 @@ class ChoreographedTrainer(GRPOTrainer):
             .transpose(-1, -2)\
             .reshape(batch_size, -1)
 
-        def prefix(b, _, q_idx, kv_idx):
-            if q_idx >= prompt_len:
-                return kv_idx < prompt_len & prompt_mask[b, kv_idx] > 0
-            return q_idx >= kv_idx & prompt_mask[b, kv_idx] > 0
+        attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
 
-        def interleaved(b, _, q_idx, kv_idx):
-            return q_idx >= prompt_len & ((q_idx - prompt_len) % self.choreography_k) == ((kv_idx - prompt_len) % self.choreography_k)
+        # TODO -- think about thread-wise prefills
+        def mask_mod(b, _, q_idx, kv_idx):
+            in_comp = q_idx >= prompt_len
+            in_prompt = ~in_comp
+
+            prefix = (
+                (in_comp & (kv_idx < prompt_len))   # generated tokens see the entire prompt
+                | (in_prompt & (q_idx >= kv_idx))   # prompt tokens have a regular causal mask
+            )
+
+            interleaved = (
+                in_comp
+                & (kv_idx >= prompt_len)            # for tokens after the prompt...
+                & (q_idx >= kv_idx)                 # look at things before me that...
+                & (                                 # belong to the same thread!
+                    ((q_idx - prompt_len) % self.choreography_k)
+                    == ((kv_idx - prompt_len) % self.choreography_k)
+                )
+            )
+
+            return ((prefix | interleaved) & (attention_mask[b, kv_idx] > 0))
 
         choreographed_mask = create_block_mask(
-            mask_mod=or_masks(prefix, interleaved),
+            mask_mod=mask_mod,
             B=batch_size, H=None,
             Q_LEN=prompt_len+comp_len,
             KV_LEN=prompt_len+comp_len,
+            BLOCK_SIZE=(1 if DEBUG else 128),
         )
 
-        # so the mask comprises 2 parts... for now we will broadcast across the head dimension but NOT the batch dimension
+        if DEBUG:
+            print(choreographed_mask.to_dense())
 
         with torch.no_grad():
-            print('computing log probs and shit')
             logps_kwargs = {
                 'input_ids': prompt_completion_ids,
                 'logits_to_keep': comp_len,
@@ -174,7 +189,7 @@ class ChoreographedTrainer(GRPOTrainer):
             else:
                 old_per_token_logps = self._get_per_token_logps(self.model, **logps_kwargs)
 
-            logps_kwargs['attention_mask'] = torch.cat([prompt_mask, completion_mask], dim=1)
+            # TODO -- this uses the same mask FOR NOW
             if self.beta == 0.0:
                 ref_per_token_logps = None
             elif self.ref_model is not None:
@@ -184,7 +199,6 @@ class ChoreographedTrainer(GRPOTrainer):
                     ref_per_token_logps = self._get_per_token_logps(self.model, **logps_kwargs)
 
         completions_text = self._parse_interleaved(completion_ids)
-        print(f'completions:\n{completions_text}')
         if is_conversational(inputs[0]):
             completions = []
             for prompt, batch in zip(prompts, completions_text):
@@ -268,8 +282,8 @@ class ChoreographedTrainer(GRPOTrainer):
         last_hidden_state = self._get_last_hidden_state(
             model,
             input_ids=torch.cat([inputs['prompt_ids'], inputs['completion_ids']], dim=1),
-            attention_mask=inputs['choregraphed_mask'],
-            logits_to_keep=inputs['completion_ids'].shape(1)
+            attention_mask=inputs['choreographed_mask'],
+            logits_to_keep=inputs['completion_ids'].shape[1]
         )
 
         unwrapped_model = self.accelerator.unwrap_model(model)

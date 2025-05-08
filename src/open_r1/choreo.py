@@ -199,6 +199,7 @@ class ChoreographedModel(Qwen2Model):
             batch_size=input_tensor.shape[0],
             config=self.config,
             past_key_values=past_key_values,
+            device=self.device,
         )
 
         if (
@@ -215,20 +216,27 @@ class ChoreographedModel(Qwen2Model):
         return causal_mask
 
 @contextmanager
-def sdpa_context(obj):
-    original = getattr(obj.config, 'attn_implementation', None)
-    obj.config.attn_implementation = "sdpa"
+def attn_impl_context(obj, impl: str):
+    originals = [
+        layer.self_attn.config._attn_implementation
+        for layer in obj.model.layers
+    ]
+    for layer in obj.model.layers:
+        layer.self_attn.config._attn_implementation = impl
     try:
         yield
     finally:
-        obj.config.attn_implementation = original
+        for layer, orig in zip(obj.model.layers, originals):
+            layer.self_attn.config._attn_implementation = orig
 
-def with_sdpa(method):
-    @functools.wraps(method)
-    def wrapper(self, *args, **kwargs):
-        with sdpa_context(self):
-            return method(self, *args, **kwargs)
-    return wrapper
+def force_attn_impl(impl: str):
+    def decorator(method):
+        @functools.wraps(method)
+        def wrapper(self, *args, **kwargs):
+            with attn_impl_context(self, impl):
+                return method(self, *args, **kwargs)
+        return wrapper
+    return decorator
 
 class ChoreographedCausalLM(Qwen2ForCausalLM):
 
@@ -245,8 +253,6 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.post_init()
 
-    # force sdpa for generation...
-    @with_sdpa
     def _choreographed_sample(
         self,
         input_ids: torch.LongTensor,
@@ -384,8 +390,8 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
         else:
             return input_ids
 
-    # this is just a direct copy with an added branch to dispatch _choreographed_sample
     @torch.no_grad()
+    @force_attn_impl('sdpa') # lol!
     def generate(
         self,
         inputs: Optional[torch.Tensor] = None,
