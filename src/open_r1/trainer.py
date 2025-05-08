@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch.nn.attention.flex_attention import create_block_mask
 
-from trl.trainer import GRPOTrainer
+from trl import GRPOTrainer
 from trl.trainer.grpo_trainer import nanstd, split_tensor_dict
 from trl.models.utils import unwrap_model_for_generation
 from trl.data_utils import maybe_apply_chat_template, is_conversational

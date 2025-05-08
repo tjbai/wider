@@ -14,103 +14,23 @@
 
 import os
 import sys
-import yaml
 import logging
-from typing import Optional, Union, Iterable
 
 import datasets
 import transformers
 from datasets import load_dataset
 from transformers import set_seed, HfArgumentParser
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.hf_argparser import DataClass, DataClassType
-from trl.trainer import GRPOTrainer
-from peft import LoraConfig, PeftConfig
+from trl import TrlParser, get_peft_config
 
 from open_r1.configs import GRPOConfig, GRPOScriptArguments, ModelConfig
 from open_r1.rewards import get_reward_funcs
+from open_r1.trainer import ChoreographedTrainer
 from open_r1.utils import get_model, get_tokenizer
 from open_r1.utils.callbacks import get_callbacks
 from open_r1.utils.wandb_logging import init_wandb_training
 
 logger = logging.getLogger(__name__)
-
-# TODO -- copied from `trl` bc of import frunking
-class TrlParser(HfArgumentParser):
-    def __init__(
-        self,
-        dataclass_types: Optional[Union[DataClassType, Iterable[DataClassType]]] = None,
-        **kwargs,
-    ):
-        if dataclass_types is None:
-            dataclass_types = []
-        elif not isinstance(dataclass_types, Iterable):
-            dataclass_types = [dataclass_types]
-
-        for dataclass_type in dataclass_types:
-            if "config" in dataclass_type.__dataclass_fields__:
-                raise ValueError(
-                    f"Dataclass {dataclass_type.__name__} has a field named 'config'. This field is reserved for the "
-                    f"config file path and should not be used in the dataclass."
-                )
-
-        super().__init__(dataclass_types=dataclass_types, **kwargs)
-
-    def parse_args_and_config(
-        self, args: Optional[Iterable[str]] = None, return_remaining_strings: bool = False
-    ) -> tuple[DataClass, ...]:
-        args = list(args) if args is not None else sys.argv[1:]
-        if "--config" in args:
-            config_index = args.index("--config")
-            args.pop(config_index)  # remove the --config flag
-            config_path = args.pop(config_index)  # get the path to the config file
-            with open(config_path) as yaml_file:
-                config = yaml.safe_load(yaml_file)
-
-            if "env" in config:
-                env_vars = config.pop("env", {})
-                if not isinstance(env_vars, dict):
-                    raise ValueError("`env` field should be a dict in the YAML file.")
-                for key, value in env_vars.items():
-                    os.environ[key] = str(value)
-
-            config_remaining_strings = self.set_defaults_with_config(**config)
-        else:
-            config_remaining_strings = []
-
-        output = self.parse_args_into_dataclasses(args=args, return_remaining_strings=return_remaining_strings)
-
-        if return_remaining_strings:
-            args_remaining_strings = output[-1]
-            return output[:-1] + (config_remaining_strings + args_remaining_strings,)
-        else:
-            return output
-
-    def set_defaults_with_config(self, **kwargs) -> list[str]:
-        for action in self._actions:
-            if action.dest in kwargs:
-                action.default = kwargs.pop(action.dest)
-                action.required = False
-        remaining_strings = [item for key, value in kwargs.items() for item in [f"--{key}", str(value)]]
-        return remaining_strings
-
-def get_peft_config(model_args: ModelConfig) -> Optional[PeftConfig]:
-    if model_args.use_peft is False:
-        return None
-
-    peft_config = LoraConfig(
-        task_type=model_args.lora_task_type,
-        r=model_args.lora_r,
-        target_modules=model_args.lora_target_modules,
-        lora_alpha=model_args.lora_alpha,
-        lora_dropout=model_args.lora_dropout,
-        bias="none",
-        use_rslora=model_args.use_rslora,
-        use_dora=model_args.use_dora,
-        modules_to_save=model_args.lora_modules_to_save,
-    )
-
-    return peft_config
 
 def main(script_args, training_args, model_args):
     # Set seed for reproducibility
@@ -187,7 +107,7 @@ def main(script_args, training_args, model_args):
         if "messages" in dataset[split].column_names:
             dataset[split] = dataset[split].remove_columns("messages")
 
-    trainer = GRPOTrainer(
+    trainer = ChoreographedTrainer(
         model=model,
         reward_funcs=reward_funcs,
         args=training_args,
