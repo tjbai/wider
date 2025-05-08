@@ -3,6 +3,8 @@ from typing import Union, Callable, Any, List, Dict
 
 import torch
 import torch.nn as nn
+from torch.nn.attention.flex_attention import create_block_mask, or_masks
+
 from trl.trainer import GRPOTrainer
 from trl.trainer.grpo_trainer import nanstd
 from trl.model.utils import unwrap_model_for_generation
@@ -116,8 +118,22 @@ class ChoreogrpahedGRPOTrainer(GRPOTrainer):
             .transpose(-1, -2)\
             .reshape(batch_size, -1)
 
-        # TODO -- not finished here... if we can do flex attention that would be ideal
-        choreographed_mask = torch.zeros((batch_size, prompt_len+comp_len, prompt_len+comp_len), device=device, dtype=torch.int())
+        def prefix(b, _, q_idx, kv_idx):
+            if q_idx >= prompt_len:
+                return kv_idx < prompt_len & prompt_mask[b, kv_idx] > 0
+            return q_idx >= kv_idx & prompt_mask[b, kv_idx] > 0
+
+        def interleaved(b, _, q_idx, kv_idx):
+            return q_idx >= prompt_len & ((q_idx - prompt_len) % self.choreography_k) == ((kv_idx - prompt_len) % self.choreography_k)
+
+        choreographed_mask = create_block_mask(
+            mask_mod=or_masks(prefix, interleaved),
+            B=batch_size, H=None,
+            Q_LEN=prompt_len+comp_len,
+            KV_LEN=prompt_len+comp_len,
+        )
+
+        # so the mask comprises 2 parts... for now we will broadcast across the head dimension but NOT the batch dimension
 
         with torch.no_grad():
             logps_kwargs = {
@@ -235,10 +251,10 @@ class ChoreogrpahedGRPOTrainer(GRPOTrainer):
             lin_weight=unwrapped_model.lm_head.weight,
             selected_token_ids=inputs['completion_ids'],
             attention_mask=inputs['completion_mask'],
-            advantages=inputs["advantages"],
+            advantages=inputs['advantages'],
             bias=unwrapped_model.lm_head.bias,
-            ref_per_token_logps=inputs["ref_per_token_logps"],
-            old_per_token_logps=inputs["old_per_token_logps"],
+            ref_per_token_logps=inputs['ref_per_token_logps'],
+            old_per_token_logps=inputs['old_per_token_logps'],
         )
 
         mean_kl = metrics[0] if self.beta != 0.0 else None

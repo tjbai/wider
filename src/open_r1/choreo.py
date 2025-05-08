@@ -1,14 +1,15 @@
 import json
 import inspect
 import warnings
+import functools
+from contextlib import contextmanager
 from typing import Optional, Union, Callable, List
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
-from torch.nn.attention.flex_attention import BlockMask
-from torch.nn.attention.flex_attention import create_block_mask as create_block_causal_mask_flex
+from torch.nn.attention.flex_attention import BlockMask, create_block_mask as create_block_causal_mask_flex
 
 from transformers import Qwen2Model
 from transformers.utils.generic import ExplicitEnum
@@ -82,7 +83,7 @@ def make_flex_block_causal_mask(
     attention_chunk_size: Optional[int] = None,
     query_length=None,
     key_length=None,
-    offsets: Optional[Tuple[Offset, Offset]] = None,
+    offsets=None,
 ) -> BlockMask:
     batch_size, total_seq_len = attention_mask_2d.shape
     if not key_length:
@@ -117,11 +118,10 @@ def make_flex_block_causal_mask(
     return create_block_causal_mask_flex(
         mask_mod=mask_mod,
         B=batch_size,
-        H=None,  # attention head
+        H=None, # attention head
         Q_LEN=query_length,
         KV_LEN=key_length,
         device=device,
-        _compile=True,
     )
 
 class ChoreographedModel(Qwen2Model):
@@ -214,6 +214,22 @@ class ChoreographedModel(Qwen2Model):
 
         return causal_mask
 
+@contextmanager
+def sdpa_context(obj):
+    original = getattr(obj.config, 'attn_implementation', None)
+    obj.config.attn_implementation = "sdpa"
+    try:
+        yield
+    finally:
+        obj.config.attn_implementation = original
+
+def with_sdpa(method):
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with sdpa_context(self):
+            return method(self, *args, **kwargs)
+    return wrapper
+
 class ChoreographedCausalLM(Qwen2ForCausalLM):
 
     @classmethod
@@ -229,6 +245,8 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.post_init()
 
+    # force sdpa for generation...
+    @with_sdpa
     def _choreographed_sample(
         self,
         input_ids: torch.LongTensor,
@@ -241,7 +259,6 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
         device = self.device
-
         eos_token_id = generation_config._eos_token_tensor
         pad_token_id = generation_config._pad_token_tensor
 
@@ -262,14 +279,6 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
             l for l in logits_processor
             if isinstance(l, (TopPLogitsWarper, TemperatureLogitsWarper))
         ])
-
-        '''
-        # TODO -- why does this fail
-        compile_forward = self._valid_auto_compile_criteria(model_kwargs, generation_config)
-        if compile_forward:
-            os.environ["TOKENIZERS_PARALLELISM"] = "0"
-            model_forward = self.get_compiled_call(generation_config.compile_config)
-        '''
 
         if generation_config.prefill_chunk_size is not None:
             model_kwargs = self._prefill_chunking(input_ids, generation_config, **model_kwargs)
@@ -343,8 +352,8 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
                 probs = F.softmax(next_token_scores, dim=-1)
                 next_tokens = sample_tokens_parallel(probs)
             else:
-                raise NotImplementedError('todo')
-            
+                raise NotImplementedError()
+
             next_tokens[~unfinished_sequences] = pad_token_id
 
             input_ids = torch.cat([input_ids, next_tokens], dim=-1)
