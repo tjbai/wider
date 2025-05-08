@@ -7,12 +7,12 @@ from torch.nn.attention.flex_attention import create_block_mask, or_masks
 
 from trl.trainer import GRPOTrainer
 from trl.trainer.grpo_trainer import nanstd
-from trl.model.utils import unwrap_model_for_generation
+from trl.models.utils import unwrap_model_for_generation
 from trl.data_utils import maybe_apply_chat_template, is_conversational
-from trl.extras.profiling import profiling_context
+from trl.extras.profiling import profiling_context, profiling_decorator
 from accelerate.utils import gather, gather_object
 
-class ChoreogrpahedGRPOTrainer(GRPOTrainer):
+class ChoreographedTrainer(GRPOTrainer):
 
     def __init__(self, *args, choreography_k=1, **kwargs):
         super().__init__(*args, **kwargs)
@@ -56,7 +56,28 @@ class ChoreogrpahedGRPOTrainer(GRPOTrainer):
 
         return rewards_per_func
 
+    @profiling_decorator
+    def _prepare_inputs(
+        self, accumulated_local_batch: dict[str, Union[torch.Tensor, Any]]
+    ) -> dict[str, Union[torch.Tensor, Any]]:
+        mode = "train" if self.model.training else "eval"
+        if mode == "train":
+            generate_every = self.args.gradient_accumulation_steps * self.num_iterations
+            if self._step % generate_every == 0 or self._buffered_inputs is None:
+                accumulated_local_batch = self._generate_and_score_completions(accumulated_local_batch)
+                self._buffered_inputs = split_tensor_dict(
+                    accumulated_local_batch, self.args.gradient_accumulation_steps
+                )
+            inputs = self._buffered_inputs[self._step % self.args.gradient_accumulation_steps]
+            self._step += 1
+        else:
+            inputs = self._generate_and_score_completions(accumulated_local_batch)
+        return inputs
+
     def _generate_and_score_completions(self, inputs) -> Dict:
+        print('dispatching generate and score')
+        print(inputs)
+
         device = self.accelerator.device
         mode = 'train' if self.model.training else 'eval'
 
@@ -67,6 +88,8 @@ class ChoreogrpahedGRPOTrainer(GRPOTrainer):
         )
         prompt_inputs = super()._prepare_inputs(prompt_inputs)
         prompt_ids, prompt_mask = prompt_inputs['input_ids'], prompt_inputs['attention_mask']
+
+        print('doesnt get here')
 
         if self.max_prompt_len is not None:
             prompt_ids = prompt_ids[:, -self.max_prompt_length :]
@@ -80,6 +103,7 @@ class ChoreogrpahedGRPOTrainer(GRPOTrainer):
             self.accelerator,
             gather_deepspeed3_params=self.args.ds3_gather_for_generation,
         ) as unwrapped_model:
+            print('starting generate')
             if (was_ckpt := unwrapped_model.is_gradient_checkpointing):
                 unwrapped_model.gradient_checkpointing_disable()
                 unwrapped_model.config.use_cache = True
@@ -94,6 +118,7 @@ class ChoreogrpahedGRPOTrainer(GRPOTrainer):
             if was_ckpt:
                 unwrapped_model.gradient_checkpointing_enable()
 
+        print('done generating')
         _, prompt_len = prompt_ids.shape
         prompt_ids = prompt_completion_ids[:, :prompt_len]
         completion_ids = prompt_completion_ids[:, prompt_len:]
@@ -136,6 +161,7 @@ class ChoreogrpahedGRPOTrainer(GRPOTrainer):
         # so the mask comprises 2 parts... for now we will broadcast across the head dimension but NOT the batch dimension
 
         with torch.no_grad():
+            print('computing log probs and shit')
             logps_kwargs = {
                 'input_ids': prompt_completion_ids,
                 'logits_to_keep': comp_len,
@@ -158,6 +184,7 @@ class ChoreogrpahedGRPOTrainer(GRPOTrainer):
                     ref_per_token_logps = self._get_per_token_logps(self.model, **logps_kwargs)
 
         completions_text = self._parse_interleaved(completion_ids)
+        print(f'completions:\n{completions_text}')
         if is_conversational(inputs[0]):
             completions = []
             for prompt, batch in zip(prompts, completions_text):
