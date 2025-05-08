@@ -1,19 +1,64 @@
 model_name_or_path: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
 model_revision: main
 torch_dtype: bfloat16
-attn_implementation: sdpa
+attn_implementation: flex_attention
 bf16: true
 use_vllm: false
-use_liger_kernel: true
-
+use_liger_loss: true
 to_choreo: true
 choreo_k: 1
-
-# the holy seed
 seed: 42
+
+resume_from_checkpoint: false
 
 dataset_name: tjbai/OpenR1-Math-100
 dataset_prompt_column: problem
+
+do_eval: false
+per_device_train_batch_size: 8
+per_device_eval_batch_size: 16
+gradient_accumulation_steps: 1
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+num_train_epochs: 16
+max_steps: -1
+learning_rate: 1e-6
+lr_scheduler:
+  type: cosine_with_min_lr
+  kwargs:
+    min_lr_rate: 0.1
+warmup_ratio: 0.1
+
+temperature: 0.7
+num_generations: 16
+max_prompt_length: 512
+max_completion_length: 3584
+
+reward_funcs:
+  - accuracy
+reward_weights:
+  - 1.0
+
+log_level: info
+logging_strategy: steps
+logging_steps: 1
+logging_first_step: true
+log_completions: true
+num_completions_to_print: 1
+
+push_to_hub: true
+hub_model_id: distqwen-1.5B-sanity
+hub_strategy: every_save
+
+output_dir: /pscratch/sd/t/tjbai/checkpoints
+overwrite_output_dir: true
+save_strategy: epoch
+save_total_limit: 1
+
+report_to:
+  - wandb
+wandb_project: rlfun
 
 system_prompt: "You are a helpful AI Assistant that provides well-reasoned and detailed responses.
                 You first think about the reasoning process as an internal monologue and then
@@ -111,50 +156,3 @@ chat_template: |
     <｜Assistant｜>
   {% endif %}
 
-do_eval: false
-per_device_train_batch_size: 8
-per_device_eval_batch_size: 16
-gradient_accumulation_steps: 1
-gradient_checkpointing: true
-gradient_checkpointing_kwargs:
-  use_reentrant: false
-num_train_epochs: 16
-max_steps: -1
-learning_rate: 1e-6
-lr_scheduler:
-  type: cosine_with_min_lr
-  kwargs:
-    min_lr_rate: 0.1
-warmup_ratio: 0.1
-
-temperature: 0.7
-num_generations: 16
-max_prompt_length: 512
-max_completion_length: 3584
-
-reward_funcs:
-  - format
-  - accuracy
-reward_weights:
-  - 1.0
-  - 2.0
-
-log_level: info
-logging_strategy: steps
-logging_steps: 1
-logging_first_step: true
-log_completions: true
-num_completions_to_print: 1
-
-push_to_hub: true
-hub_model_id: distqwen-1.5B-sanity
-hub_strategy: every_save
-
-output_dir: /pscratch/sd/t/tjbai/checkpoints
-overwrite_output_dir: true
-save_strategy: epoch
-save_total_limit: 1
-
-report_to:
-  - wandb
-wandb_project: rlfun

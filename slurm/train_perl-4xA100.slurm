@@ -87,7 +87,6 @@ if [[ -z "$MODEL" || -z "$TASK" || -z "$CONFIG_SUFFIX" || -z "$ACCELERATOR" ]]; 
   exit 1
 fi
 
-
 CONFIG_FILE=recipes/$MODEL/$TASK/config_$CONFIG_SUFFIX.yaml
 GRAD_ACC_STEPS=$(grep 'gradient_accumulation_steps' $CONFIG_FILE | awk '{print $2}')
 
@@ -98,8 +97,6 @@ for arg in "${ARGS[@]}"; do
         break
     fi
 done
-
-echo "Gradient accumulation steps: $GRAD_ACC_STEPS"
 
 MODEL=$(grep 'model_name_or_path:' $CONFIG_FILE | awk '{print $2}')
 REVISION=$(grep 'model_revision:' $CONFIG_FILE | head -n 1 | awk '{print $2}')
@@ -116,7 +113,6 @@ USE_VLLM="false"
 if [[ -f "$CONFIG_FILE" ]] && grep -qE '^\s*use_vllm:\s*true' "$CONFIG_FILE"; then
     USE_VLLM="true"
 fi
-# if using vllm
 if [[ "$USE_VLLM" == "true" ]]; then
      TRAIN_NODES=("${NODELIST[@]:0:$((NUM_NODES - 1))}")
      VLLM_NODE=${NODELIST[-1]} # Last node
@@ -174,3 +170,4 @@ HOURS=$((ELAPSED_SECONDS / 3600))
 MINUTES=$(( (ELAPSED_SECONDS % 3600) / 60 ))
 SECONDS=$((ELAPSED_SECONDS % 60))
 echo "TOTAL JOB TIME: ${HOURS}h ${MINUTES}m ${SECONDS}s (${ELAPSED_SECONDS} seconds)"
+

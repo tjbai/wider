@@ -71,12 +71,12 @@ def _compute_accuracy(content: str, sol: str) -> Optional[float]:
 
 
 def accuracy_reward(
-    completions: List[Messages],
-    solutions: List[str],
+    completions: List[List[Messages]],
+    solution: List[str],
     **kwargs
 ) -> List[Optional[float]]:
     rewards: List[Optional[float]] = []
-    for comp, sol in zip(completions, solutions):
+    for [comp], sol in zip(completions, solution):
         content = comp[0]['content']
         rewards.append(_compute_accuracy(content, sol))
     return rewards
@@ -84,11 +84,11 @@ def accuracy_reward(
 
 def group_sum_accuracy_reward(
     group_completions: List[List[Messages]],
-    solutions: List[str],
+    solution: List[str],
     **kwargs
 ) -> List[Optional[float]]:
     rewards: List[Optional[float]] = []
-    for group, sol in zip(group_completions, solutions):
+    for group, sol in zip(group_completions, solution):
         total = 0.0
         any_valid = False
         for comp in group:
@@ -103,7 +103,7 @@ def group_sum_accuracy_reward(
 def format_reward(completions, **kwargs):
     """Reward function that checks if the reasoning process is enclosed within <think> and </think> tags, while the final answer is enclosed within <answer> and </answer> tags."""
     pattern = r"^<think>\n.*?\n</think>\n<answer>\n.*?\n</answer>$"
-    completion_contents = [completion[0]["content"] for completion in completions]
+    completion_contents = [completion[0]["content"] for [completion] in completions]
     matches = [re.match(pattern, content, re.DOTALL | re.MULTILINE) for content in completion_contents]
     return [1.0 if match else 0.0 for match in matches]
 
