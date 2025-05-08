@@ -1,6 +1,7 @@
 import os
 import warnings
-from typing import Union, Any, List, Dict
+import random
+from typing import Union, Any, List, Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -9,9 +10,51 @@ from torch.nn.attention.flex_attention import create_block_mask
 from trl import GRPOTrainer
 from trl.trainer.grpo_trainer import nanstd, split_tensor_dict
 from trl.models.utils import unwrap_model_for_generation
+from trl.import_utils import is_rich_available
 from trl.data_utils import maybe_apply_chat_template, is_conversational
 from trl.extras.profiling import profiling_context, profiling_decorator
 from accelerate.utils import gather, gather_object
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+def print_prompt_completions_sample(
+    prompts: List[str],
+    completions: List[List[str]],
+    rewards: Dict[str, List[float]],
+    step: int,
+    num_samples: Optional[int] = None
+) -> None:
+    console = Console()
+    table = Table(show_header=True, header_style="bold white", expand=True)
+
+    table.add_column("Prompt", style="bright_yellow")
+    for i in range(len(completions[0])):
+        table.add_column(f"Completion {i+1}", style="bright_green")
+    for reward_name in rewards.keys():
+        table.add_column(reward_name, style="bold cyan", justify="right")
+
+    if num_samples is not None:
+        if num_samples >= len(prompts):
+            num_samples = None
+        elif num_samples <= 0:
+            return
+
+    if num_samples is not None:
+        indices = random.sample(range(len(prompts)), num_samples)
+        prompts = [prompts[i] for i in indices]
+        completions = [completions[i] for i in indices]
+        rewards = {key: [val[i] for i in indices] for key, val in rewards.items()}
+
+    for i in range(len(prompts)):
+        reward_values = [f"{rewards[key][i]:.2f}" for key in rewards.keys()]
+        table.add_row(Text(prompts[i]), *[Text(comp) for comp in completions[i]], *reward_values)
+        table.add_section()
+
+    panel = Panel(table, expand=False, title=f"Step {step}", border_style="bold white")
+    console.print(panel)
 
 class ChoreographedTrainer(GRPOTrainer):
 
@@ -155,7 +198,7 @@ class ChoreographedTrainer(GRPOTrainer):
                 in_comp
                 & (kv_idx >= prompt_len)                                # for tokens after the prompt...
                 & (q_idx >= kv_idx)                                     # look at things before me that...
-                & (                                                     # belong to the same thread!
+                & (                                                     # belong to the same thread
                     ((q_idx - prompt_len) % self.choreography_k)
                     == ((kv_idx - prompt_len) % self.choreography_k)
                 )
@@ -303,3 +346,38 @@ class ChoreographedTrainer(GRPOTrainer):
             self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
         self._metrics[mode]["clip_ratio"].append(self.accelerator.gather_for_metrics(clip_ratio).mean().item())
         return loss
+
+    def log(self, logs: dict[str, float], start_time: Optional[float] = None) -> None:
+        mode = "train" if self.model.training else "eval"
+        metrics = {key: sum(val) / len(val) for key, val in self._metrics[mode].items()}  # average the metrics
+
+        if mode == "eval":
+            metrics = {f"eval_{key}": val for key, val in metrics.items()}
+
+        logs = {**logs, **metrics}
+        super().log(logs, start_time)
+        self._metrics[mode].clear()
+
+        if self.accelerator.is_main_process and self.log_completions:
+            if is_rich_available():
+                print_prompt_completions_sample(
+                    self._textual_logs["prompt"],
+                    self._textual_logs["completion"],
+                    self._textual_logs["rewards"],
+                    self.state.global_step,
+                    self.num_completions_to_print,
+                )
+
+            if self.args.report_to and "wandb" in self.args.report_to and wandb.run is not None:
+                import pandas as pd
+
+                table = {
+                    "step": [str(self.state.global_step)] * len(self._textual_logs["prompt"]),
+                    "prompt": self._textual_logs["prompt"],
+                    "completion": self._textual_logs["completion"],
+                    **self._textual_logs["rewards"],
+                }
+                df = pd.DataFrame(table)
+                if self.wandb_log_unique_prompts:
+                    df = df.drop_duplicates(subset=["prompt"])
+                wandb.log({"completions": wandb.Table(dataframe=df)})
