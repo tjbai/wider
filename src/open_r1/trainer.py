@@ -1,6 +1,6 @@
 import os
 import warnings
-from typing import Union, Callable, Any, List, Dict
+from typing import Union, Any, List, Dict
 
 import torch
 import torch.nn as nn
@@ -12,8 +12,6 @@ from trl.models.utils import unwrap_model_for_generation
 from trl.data_utils import maybe_apply_chat_template, is_conversational
 from trl.extras.profiling import profiling_context, profiling_decorator
 from accelerate.utils import gather, gather_object
-
-from .choreo import debug
 
 class ChoreographedTrainer(GRPOTrainer):
 
@@ -155,9 +153,9 @@ class ChoreographedTrainer(GRPOTrainer):
 
             interleaved = (
                 in_comp
-                & (kv_idx >= prompt_len)            # for tokens after the prompt...
-                & (q_idx >= kv_idx)                 # look at things before me that...
-                & (                                 # belong to the same thread!
+                & (kv_idx >= prompt_len)                                # for tokens after the prompt...
+                & (q_idx >= kv_idx)                                     # look at things before me that...
+                & (                                                     # belong to the same thread!
                     ((q_idx - prompt_len) % self.choreography_k)
                     == ((kv_idx - prompt_len) % self.choreography_k)
                 )

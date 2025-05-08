@@ -20,7 +20,7 @@ import json
 import math
 import re
 from functools import partial, update_wrapper
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, List
 
 from latex2sympy2_extended import NormalizationConfig
 from math_verify import LatexExtractionConfig, parse, verify
@@ -28,6 +28,7 @@ from math_verify import LatexExtractionConfig, parse, verify
 from .utils import is_e2b_available
 from .utils.ioi import SubtaskResult, add_includes, get_piston_client_from_env, score_subtask
 
+Messages = List[Dict[str, str]]
 
 if is_e2b_available():
     from dotenv import load_dotenv
@@ -39,49 +40,63 @@ if is_e2b_available():
 else:
     AsyncSandbox = None
 
+def _compute_accuracy(content: str, sol: str) -> Optional[float]:
+    gold = parse(sol, extraction_mode="first_match")
+    if not gold:
+        return None
 
-def accuracy_reward(completions: list[list[dict[str, str]]], solution: list[str], **kwargs) -> list[Optional[float]]:
-    """Reward function that checks if the completion is the same as the ground truth."""
-    contents = [completion[0]["content"] for completion in completions]
-    rewards = []
-    for content, sol in zip(contents, solution):
-        gold_parsed = parse(
-            sol,
-            extraction_mode="first_match",
-        )
-        if len(gold_parsed) != 0:
-            # We require the answer to be provided in correct latex (no malformed operators)
-            answer_parsed = parse(
-                content,
-                extraction_config=[
-                    LatexExtractionConfig(
-                        normalization_config=NormalizationConfig(
-                            nits=False,
-                            malformed_operators=False,
-                            basic_latex=True,
-                            equations=True,
-                            boxed="all",
-                            units=True,
-                        ),
-                        # Ensures that boxed is tried first
-                        boxed_match_priority=0,
-                        try_extract_without_anchor=False,
-                    )
-                ],
-                extraction_mode="first_match",
+    answer = parse(
+        content,
+        extraction_config=[
+            LatexExtractionConfig(
+                normalization_config=NormalizationConfig(
+                    nits=False,
+                    malformed_operators=False,
+                    basic_latex=True,
+                    equations=True,
+                    boxed="all",
+                    units=True,
+                ),
+                boxed_match_priority=0,
+                try_extract_without_anchor=False,
             )
-            # Compute binary rewards if verifiable, `None` otherwise to skip this example
-            try:
-                reward = float(verify(gold_parsed, answer_parsed))
-            except Exception as e:
-                print(f"verify failed: {e}, answer: {answer_parsed}, gold: {gold_parsed}")
-                reward = None
-        else:
-            # If the gold solution is not parseable, we assign `None` to skip this example
-            reward = None
-            print("Failed to parse gold solution: ", sol)
-        rewards.append(reward)
+        ],
+        extraction_mode="first_match",
+    )
+    try:
+        return float(verify(gold, answer))
+    except Exception as e:
+        print(f"verify failed: {e}, answer: {answer}, gold: {gold}")
+        return None
 
+
+def accuracy_reward(
+    completions: List[Messages],
+    solutions: List[str],
+    **kwargs
+) -> List[Optional[float]]:
+    rewards: List[Optional[float]] = []
+    for comp, sol in zip(completions, solutions):
+        content = comp[0]['content']
+        rewards.append(_compute_accuracy(content, sol))
+    return rewards
+
+
+def group_sum_accuracy_reward(
+    group_completions: List[List[Messages]],
+    solutions: List[str],
+    **kwargs
+) -> List[Optional[float]]:
+    rewards: List[Optional[float]] = []
+    for group, sol in zip(group_completions, solutions):
+        total = 0.0
+        any_valid = False
+        for comp in group:
+            reward = _compute_accuracy(comp[0]['content'], sol)
+            if reward is not None:
+                total += reward
+                any_valid = True
+        rewards.append((total / len(group)) if any_valid else None)
     return rewards
 
 
@@ -565,6 +580,7 @@ async def run_script(script: str, language: str, semaphore: asyncio.Semaphore) -
 
 def get_reward_funcs(script_args) -> list[Callable]:
     REWARD_FUNCS_REGISTRY = {
+        "group_sum_accuracy": group_sum_accuracy_reward,
         "accuracy": accuracy_reward,
         "format": format_reward,
         "reasoning_steps": reasoning_steps_reward,
