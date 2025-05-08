@@ -17,14 +17,13 @@ dependencies = [
     "lighteval>=0.8.1",
     "fire>=0.7.0",
     "peft>=0.15.2",
+    "trl>=0.17.0",
 ]
 
 [dependency-groups]
 dev = [
     "open-r1",
-    "trl>=0.17.0",
 ]
 
 [tool.uv.sources]
 open-r1 = { workspace = true }
-trl = { path = "trl" }
