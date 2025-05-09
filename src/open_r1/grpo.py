@@ -21,7 +21,7 @@ import transformers
 from datasets import load_dataset
 from transformers import set_seed, HfArgumentParser
 from transformers.trainer_utils import get_last_checkpoint
-from trl import TrlParser, get_peft_config
+from trl import GRPOTrainer, TrlParser, get_peft_config
 
 from open_r1.configs import GRPOConfig, GRPOScriptArguments, ModelConfig
 from open_r1.rewards import get_reward_funcs
@@ -107,7 +107,8 @@ def main(script_args, training_args, model_args):
         if "messages" in dataset[split].column_names:
             dataset[split] = dataset[split].remove_columns("messages")
 
-    trainer = ChoreographedTrainer(
+    # trainer = ChoreographedTrainer(
+    trainer = GRPOTrainer(
         model=model,
         reward_funcs=reward_funcs,
         args=training_args,

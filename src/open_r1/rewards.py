@@ -76,9 +76,14 @@ def accuracy_reward(
     **kwargs
 ) -> List[Optional[float]]:
     rewards: List[Optional[float]] = []
-    for [comp], sol in zip(completions, solution):
-        content = comp[0]['content']
-        rewards.append(_compute_accuracy(content, sol))
+    if isinstance(completions[0][0], list):
+        for [comp], sol in zip(completions, solution):
+            content = comp[0]['content']
+            rewards.append(_compute_accuracy(content, sol))
+    else:
+        for comp, sol in zip(completions, solution):
+            content = comp[0]['content']
+            rewards.append(_compute_accuracy(content, sol))
     return rewards
 
 

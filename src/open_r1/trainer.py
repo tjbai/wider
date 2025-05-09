@@ -3,6 +3,7 @@ import warnings
 import random
 from typing import Union, Any, List, Dict, Optional
 
+import wandb
 import torch
 import torch.nn as nn
 from torch.nn.attention.flex_attention import create_block_mask
@@ -20,7 +21,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-def print_prompt_completions_sample(
+def print_completions(
     prompts: List[str],
     completions: List[List[str]],
     rewards: Dict[str, List[float]],
@@ -304,7 +305,10 @@ class ChoreographedTrainer(GRPOTrainer):
         self._metrics[mode]['reward_std'].append(std_grouped_rewards.mean().item())
 
         self._textual_logs['prompt'].extend(gather_object(prompts_text))
-        self._textual_logs['completion'].extend(gather_object(completions_text))
+        self._textual_logs['completion'].extend(map(
+            lambda x: '### Solution:\n\n'.join(x),
+            gather_object(completions_text)
+        ))
         for i, name in enumerate(self.reward_func_names):
             self._textual_logs['rewards'][name].extend(rewards_per_func[:, i].tolist())
 
@@ -355,12 +359,12 @@ class ChoreographedTrainer(GRPOTrainer):
             metrics = {f"eval_{key}": val for key, val in metrics.items()}
 
         logs = {**logs, **metrics}
-        super().log(logs, start_time)
+        super(GRPOTrainer, self).log(logs, start_time)
         self._metrics[mode].clear()
 
         if self.accelerator.is_main_process and self.log_completions:
             if is_rich_available():
-                print_prompt_completions_sample(
+                print_completions(
                     self._textual_logs["prompt"],
                     self._textual_logs["completion"],
                     self._textual_logs["rewards"],
