@@ -62,97 +62,49 @@ wandb_project: rlfun
 
 system_prompt: "A conversation between User and Assistant.
                 The user asks a question, and the Assistant solves it.
-                The assistant first thinks about the reasoning process in the mind and then provides the user with the answer,
-                and put your final answer within \\boxed{{}}.
+                The assistant first thinks about the reasoning process in the mind and then provides the user with the answer.
                 The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
-                Note to respond by English, NOT other languages."
+                Note to response by English only, and not other languages."
 
 chat_template: |
-  {# initialize generation-flag if absent #}
-  {% if not add_generation_prompt is defined %}
+  {% if add_generation_prompt is not defined %}
     {% set add_generation_prompt = false %}
   {% endif %}
 
-  {# namespace vars to track state #}
   {% set ns = namespace(
-    is_first=false,
-    is_tool=false,
-    is_output_first=true,
-    system_prompt=''
+    is_first        = false,
+    is_tool         = false,
+    is_output_first = true,
+    system_prompt   = '',
+    is_first_sp     = true
   ) %}
 
-  {# extract system prompt from messages #}
-  {%- for message in messages %}
-    {%- if message.role == 'system' %}
-      {% set ns.system_prompt = message.content %}
-    {%- endif %}
-  {%- endfor %}
+  {% for message in messages %}
+    {% if message.role == 'system' %}
+      {% if ns.is_first_sp %}
+        {% set ns.system_prompt = message.content %}
+        {% set ns.is_first_sp   = false %}
+      {% else %}
+        {% set ns.system_prompt = ns.system_prompt ~ "\n\n" ~ message.content %}
+      {% endif %}
+    {% endif %}
+  {% endfor %}
 
   {{ bos_token }}{{ ns.system_prompt }}
 
-  {# loop over all messages #}
-  {%- for message in messages %}
-
-    {# user messages #}
-    {%- if message.role == 'user' %}
+  {% for message in messages %}
+    {% if message.role == 'user' %}
       {% set ns.is_tool = false %}
-      <｜User｜>{{ message.content }}
+      <User>{{ message.content }}</User>
+    {% elif message.role == 'assistant' %}
+      {% set content = message.content %}
+      {% if '</think>' in content %}
+        {% set content = content.split('</think>')[-1] %}
+        <Assistant>{{ content }}<end_of_sentence>
+      {% endif %}
+    {% endif %}
+  {% endfor %}
 
-    {# assistant → tool call #}
-    {%- elif message.role == 'assistant' and message.content is none %}
-      {% set ns.is_tool = false %}
-      {%- for tool in message.tool_calls %}
-        {%- if not ns.is_first %}
-          <｜Assistant｜>
-          <｜tool▁calls▁begin｜>
-          <｜tool▁call▁begin｜>
-          {{ tool.type }}<｜tool▁sep｜>{{ tool.function.name }}
-          ```json
-          {{ tool.function.arguments }}
-          ```
-          <｜tool▁call▁end｜>
-          {% set ns.is_first = true %}
-        {%- else %}
-          \n<｜tool▁call▁begin｜>
-          {{ tool.type }}<｜tool▁sep｜>{{ tool.function.name }}
-          ```json
-          {{ tool.function.arguments }}
-          ```
-          <｜tool▁call▁end｜>
-          <｜tool▁calls▁end｜>
-          <｜end▁of▁sentence｜>
-        {%- endif %}
-      {%- endfor %}
-
-    {# assistant → normal reply #}
-    {%- elif message.role == 'assistant' and message.content is not none %}
-      {%- if ns.is_tool %}
-        <｜tool▁outputs▁end｜>{{ message.content }}<｜end▁of▁sentence｜>
-        {% set ns.is_tool = false %}
-      {%- else %}
-        <｜Assistant｜>{{ message.content }}<｜end▁of▁sentence｜>
-      {%- endif %}
-
-    {# tool outputs #}
-    {%- elif message.role == 'tool' %}
-      {% set ns.is_tool = true %}
-      {%- if ns.is_output_first %}
-        <｜tool▁outputs▁begin｜>
-        <｜tool▁output▁begin｜>{{ message.content }}<｜tool▁output▁end｜>
-        {% set ns.is_output_first = false %}
-      {%- else %}
-        \n<｜tool▁output▁begin｜>{{ message.content }}<｜tool▁output▁end｜>
-      {%- endif %}
-
-    {%- endif %}
-  {%- endfor %}
-
-  {# close any open tool outputs #}
-  {% if ns.is_tool %}
-    <｜tool▁outputs▁end｜>
-  {% endif %}
-
-  {# optionally add an empty assistant prompt to trigger generation #}
   {% if add_generation_prompt and not ns.is_tool %}
-    <｜Assistant｜>
+    <Assistant><think>
   {% endif %}
