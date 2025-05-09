@@ -10,6 +10,7 @@ from torch.nn.attention.flex_attention import create_block_mask
 
 from trl import GRPOTrainer
 from trl.trainer.grpo_trainer import nanstd, split_tensor_dict
+from trl.trainer.utils import selective_log_softmax
 from trl.models.utils import unwrap_model_for_generation
 from trl.import_utils import is_rich_available
 from trl.data_utils import maybe_apply_chat_template, is_conversational
@@ -20,6 +21,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+create_block_mask = torch.compile(create_block_mask)
 
 def print_completions(
     prompts: List[str],
@@ -43,19 +46,25 @@ def print_completions(
         elif num_samples <= 0:
             return
 
-    if num_samples is not None:
+    if num_samples is not None:i
         indices = random.sample(range(len(prompts)), num_samples)
         prompts = [prompts[i] for i in indices]
         completions = [completions[i] for i in indices]
         rewards = {key: [val[i] for i in indices] for key, val in rewards.items()}
 
-    for i in range(len(prompts)):
-        reward_values = [f"{rewards[key][i]:.2f}" for key in rewards.keys()]
-        table.add_row(Text(prompts[i]), *[Text(comp) for comp in completions[i]], *reward_values)
-        table.add_section()
+    # for i in range(len(prompts)):
+    #     reward_values = [f"{rewards[key][i]:.2f}" for key in rewards.keys()]
+    #     table.add_row(Text(prompts[i]), *[Text(comp) for comp in completions[i]], *reward_values)
+    #     table.add_section()
 
-    panel = Panel(table, expand=False, title=f"Step {step}", border_style="bold white")
-    console.print(panel)
+    # panel = Panel(table, expand=False, title=f"Step {step}", border_style="bold white")
+    # console.print(panel)
+
+    for i, (p, c, r) in enumerate(zip(prompts, completions, rewards)):
+        print(f'## example {i}:')
+        print('### prompt:\n', p)
+        print('### completions:\n', c)
+        print('### rewards:\n', r)
 
 class ChoreographedTrainer(GRPOTrainer):
 
@@ -72,6 +81,26 @@ class ChoreographedTrainer(GRPOTrainer):
             )
             for row in completion_ids
         ]
+
+    @profiling_decorator
+    def _get_per_token_logps(self, model, input_ids, attention_mask, logits_to_keep, batch_size=None) -> torch.Tensor:
+        batch_size = batch_size or input_ids.size(0)
+        all_logps = []
+        for i in range(0, input_ids.size(0), batch_size):
+            input_ids_batch = input_ids[i : i + batch_size]
+            attention_mask_batch = attention_mask[i : i + batch_size]
+            logits = model(
+                input_ids=input_ids_batch,
+                attention_mask=attention_mask_batch,
+                logits_to_keep=logits_to_keep + 1
+            ).logits
+            logits = logits[:, :-1, :]
+            input_ids_batch = input_ids_batch[:, -logits_to_keep:]
+            logits = logits[:, -logits_to_keep:]
+            logits.div_(self.temperature)
+            logps = selective_log_softmax(logits, input_ids_batch)
+            all_logps.append(logps)
+        return torch.cat(all_logps, dim=0)
 
     def _get_rewards_per_func(self, inputs, prompts, completions):
         device = self.accelerator.device
@@ -222,7 +251,7 @@ class ChoreographedTrainer(GRPOTrainer):
             logps_kwargs = {
                 'input_ids': prompt_completion_ids,
                 'logits_to_keep': comp_len,
-                'batch_size': self.args.per_device_train_batch_size if mode == 'train' else self.args.per_device_eval_batch_size,
+                'batch_size': (self.args.per_device_train_batch_size if mode == 'train' else self.args.per_device_eval_batch_size) // 2,
                 'attention_mask': choreographed_mask,
             }
 
@@ -363,7 +392,7 @@ class ChoreographedTrainer(GRPOTrainer):
         self._metrics[mode].clear()
 
         if self.accelerator.is_main_process and self.log_completions:
-            if is_rich_available():
+            if is_rich_available() and self.num_completions_to_print > 0:
                 print_completions(
                     self._textual_logs["prompt"],
                     self._textual_logs["completion"],

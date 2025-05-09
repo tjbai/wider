@@ -107,8 +107,7 @@ def main(script_args, training_args, model_args):
         if "messages" in dataset[split].column_names:
             dataset[split] = dataset[split].remove_columns("messages")
 
-    # trainer = ChoreographedTrainer(
-    trainer = GRPOTrainer(
+    trainer = ChoreographedTrainer(
         model=model,
         reward_funcs=reward_funcs,
         args=training_args,
