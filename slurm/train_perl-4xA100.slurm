@@ -35,10 +35,10 @@ source .venv/bin/activate
 START_TIME=$(date +%s)
 echo "START TIME: $(date)"
 
-MODEL=""
-TASK=""
-CONFIG_SUFFIX=""
-ACCELERATOR=""
+MODEL="DeepSeek-R1-Distill-Qwen-1.5B"
+TASK="grpo"
+CONFIG_SUFFIX="sanity"
+ACCELERATOR="zero2"
 DP=1
 TP=1
 OPTIONAL_ARGS=""
