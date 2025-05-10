@@ -46,7 +46,7 @@ def print_completions(
         elif num_samples <= 0:
             return
 
-    if num_samples is not None:i
+    if num_samples is not None:
         indices = random.sample(range(len(prompts)), num_samples)
         prompts = [prompts[i] for i in indices]
         completions = [completions[i] for i in indices]
@@ -157,14 +157,17 @@ class ChoreographedTrainer(GRPOTrainer):
         prompts = [x['prompt'] for x in inputs]
         prompts_text = [maybe_apply_chat_template(example, self.processing_class)['prompt'] for example in inputs]
         prompt_inputs = self.processing_class(
-            text=prompts_text, return_tensors='pt', padding=True, padding_side='left', add_special_tokens=False
+            text=prompts_text,
+            padding='max_length',
+            padding_side='left',
+            max_length=self.max_prompt_length,
+            truncation=True,
+            truncation_side='left',
+            add_special_tokens=False,
+            return_tensors='pt',
         )
         prompt_inputs = super(GRPOTrainer, self)._prepare_inputs(prompt_inputs)
         prompt_ids, prompt_mask = prompt_inputs['input_ids'], prompt_inputs['attention_mask']
-
-        if self.max_prompt_length is not None:
-            prompt_ids = prompt_ids[:, -self.max_prompt_length :]
-            prompt_mask = prompt_mask[:, -self.max_prompt_length :]
 
         if self.use_vllm:
             raise NotImplementedError('vLLM not supported')
