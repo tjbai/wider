@@ -302,7 +302,14 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
         base_mask = torch.full((batch_size, prompt_len), fill_value=0, dtype=dtype, device=device)
         base_mask[input_ids == pad_token_id] = min_dtype
         base_mask = base_mask.unsqueeze(1).unsqueeze(2).expand(-1, -1, k, -1) # (batch_size, prompt_len) -> (batch_size, 1, k, prompt_len)
-        position_ids = torch.cumsum(input_ids != pad_token_id, dim=1)[:, -1:].expand(-1, k)
+
+        full_mask = torch.cat([
+            base_mask,
+            torch.full(
+                (batch_size, 1, k, stopping_criteria.max_length),
+                fill_value=min_dtype, dtype=dtype, device=device
+            )
+        ], dim=-1)
 
         diag = torch.full((k, k), fill_value=min_dtype, dtype=dtype, device=device)
         diag.fill_diagonal_(0)
@@ -310,6 +317,7 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
 
         # initial attention mask just for prefilling
         model_kwargs['attention_mask'] = torch.where(input_ids == pad_token_id, 0, 1)
+        position_ids = torch.cumsum(input_ids != pad_token_id, dim=1)[:, -1:].expand(-1, k)
 
         cur_len = prompt_len
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
@@ -323,7 +331,13 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
             model_kwargs['past_key_values'] = outputs['past_key_values']
             model_kwargs['cache_position'] = torch.arange(model_kwargs['cache_position'][-1] + 1, model_kwargs['cache_position'][-1] + k + 1, dtype=torch.long, device=device)
             model_kwargs['position_ids'] = position_ids if is_prefill else model_kwargs['position_ids'] + 1
-            model_kwargs['attention_mask'] = torch.cat((base_mask, diag.repeat(1, 1, 1, cur_len - prompt_len + 1)), dim=-1)
+            if is_prefill:
+                model_kwargs['attention_mask'] = full_mask
+            else:
+                i = cur_len - prompt_len
+                start = prompt_len + (i * k)
+                end = prompt_len + ((i + 1) * k)
+                model_kwargs['attention_mask'][..., start:end] = diag
 
             if synced_gpus and this_peer_finished:
                 continue
