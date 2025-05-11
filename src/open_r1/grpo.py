@@ -16,6 +16,7 @@ import os
 import sys
 import logging
 
+import torch
 import datasets
 import transformers
 from datasets import load_dataset
@@ -84,6 +85,11 @@ def main(script_args, training_args, model_args):
     ##############
     logger.info("*** Loading model ***")
     model = get_model(model_args, training_args)
+
+    torch._inductor.config.triton.cudagraphs = False
+    torch._inductor.config.triton.cudagraph_trees = False
+    model.generation_config.cache_implementation = 'static'
+    model.forward = torch.compile(model.forward, mode='reduce-overhead', fullgraph=False, dynamic=False)
 
     # Get reward functions from the registry
     reward_funcs = get_reward_funcs(script_args)

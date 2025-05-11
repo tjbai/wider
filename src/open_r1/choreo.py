@@ -306,7 +306,7 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
         full_mask = torch.cat([
             base_mask,
             torch.full(
-                (batch_size, 1, k, stopping_criteria.max_length),
+                (batch_size, 1, k, stopping_criteria.max_length - prompt_len),
                 fill_value=min_dtype, dtype=dtype, device=device
             )
         ], dim=-1)
@@ -319,6 +319,14 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
         model_kwargs['attention_mask'] = torch.where(input_ids == pad_token_id, 0, 1)
         position_ids = torch.cumsum(input_ids != pad_token_id, dim=1)[:, -1:].expand(-1, k)
 
+        model_kwargs['past_key_values'] = StaticCache(
+            config=self.config,
+            max_batch_size=batch_size,
+            max_cache_len=stopping_criteria.max_length,
+            device=self.device,
+            dtype=dtype,
+        )
+
         cur_len = prompt_len
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
@@ -329,15 +337,14 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
             outputs = self(**model_inputs, return_dict=True)
 
             model_kwargs['past_key_values'] = outputs['past_key_values']
+            assert isinstance(model_kwargs['past_key_values'], StaticCache), type(model_kwargs['past_key_values'])
+            assert model_kwargs['past_key_values'].get_max_cache_shape() == stopping_criteria.max_length, 'Actual: ' + model_kwargs['past_key_values'].get_max_cache_shape()
+            kv = model_kwargs['past_key_values']
             model_kwargs['cache_position'] = torch.arange(model_kwargs['cache_position'][-1] + 1, model_kwargs['cache_position'][-1] + k + 1, dtype=torch.long, device=device)
             model_kwargs['position_ids'] = position_ids if is_prefill else model_kwargs['position_ids'] + 1
             if is_prefill:
                 model_kwargs['attention_mask'] = full_mask
-            else:
-                i = cur_len - prompt_len
-                start = prompt_len + (i * k)
-                end = prompt_len + ((i + 1) * k)
-                model_kwargs['attention_mask'][..., start:end] = diag
+            model_kwargs['attention_mask'][..., cur_len:(cur_len+k)] = diag
 
             if synced_gpus and this_peer_finished:
                 continue
@@ -380,13 +387,13 @@ class ChoreographedCausalLM(Qwen2ForCausalLM):
             if streamer is not None:
                 streamer.put(next_tokens.cpu())
 
-            if cur_len == stopping_criteria.max_length:
+            cur_len += k
+            if cur_len >= stopping_criteria.max_length:
                 this_peer_finished = True
             else:
                 unfinished_sequences = unfinished_sequences & ~(torch.isin(next_tokens, eos_token_id))
                 this_peer_finished = unfinished_sequences.max() == 0
 
-            cur_len += 1
             del outputs
 
         if streamer is not None:

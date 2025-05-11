@@ -71,6 +71,7 @@ class ChoreographedTrainer(GRPOTrainer):
     def __init__(self, *args, choreography_k=1, **kwargs):
         super().__init__(*args, **kwargs)
         self.choreography_k = choreography_k
+        self.processing_class.truncation_side = 'left'
         assert self.use_liger_loss, 'please use liger loss'
 
     def _parse_interleaved(self, completion_ids: torch.Tensor) -> List[List[str]]:
@@ -162,7 +163,6 @@ class ChoreographedTrainer(GRPOTrainer):
             padding_side='left',
             max_length=self.max_prompt_length,
             truncation=True,
-            truncation_side='left',
             add_special_tokens=False,
             return_tensors='pt',
         )
@@ -181,12 +181,16 @@ class ChoreographedTrainer(GRPOTrainer):
                 unwrapped_model.gradient_checkpointing_disable()
                 unwrapped_model.config.use_cache = True
 
-            prompt_completion_ids = unwrapped_model.generate(
+            self.generation_config.cache_implementation = 'static'
+
+            outputs = unwrapped_model.generate(
                 prompt_ids,
                 attention_mask=prompt_mask,
                 generation_config=self.generation_config,
                 use_cache=True
             )
+
+            prompt_completion_ids = outputs.clone()
 
             if was_ckpt:
                 unwrapped_model.gradient_checkpointing_enable()
