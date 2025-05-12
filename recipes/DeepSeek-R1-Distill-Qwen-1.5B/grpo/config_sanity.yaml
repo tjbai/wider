@@ -5,6 +5,7 @@ attn_implementation: flex_attention
 bf16: true
 use_vllm: false
 use_liger_loss: true
+use_liger_kernel: true
 to_choreo: true
 choreo_k: 1
 seed: 42
