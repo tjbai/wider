@@ -12,7 +12,6 @@
 #SBATCH --gres=gpu:4
 #SBATCH --output=./logs/%x-%j.out
 #SBATCH --error=./logs/%x-%j.err
-#SBATCH --requeue
 
 if [[ "$*" == *"--help"* ]]; then
   echo "Usage: sbatch slurm/train.slurm [options]"
@@ -27,9 +26,8 @@ if [[ "$*" == *"--help"* ]]; then
   exit 0
 fi
 
-# Specific configuration optimized for the Hugging Face Compute Cluster
-module load cuda/12.4
 set -x -e
+set -euo pipefail
 
 source ~/.bashrc
 source .venv/bin/activate
@@ -124,7 +122,9 @@ if [[ "$USE_VLLM" == "true" ]]; then
      OPTIONAL_ARGS="$OPTIONAL_ARGS --vllm_server_host=$VLLM_NODE"
 fi
 
-export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+export NCCL_ASYNC_ERROR_HANDLING=1
+export NCCL_ABORT_ON_ERROR=1
+export NCCL_SOCKET_NRETRY=10
 # export NCCL_DEBUG=INFO
 # export NCCL_DEBUG_SUBSYS=COLL
 # export NCCL_SOCKET_NTHREADS=1
