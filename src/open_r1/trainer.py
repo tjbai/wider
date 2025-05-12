@@ -71,6 +71,7 @@ class ChoreographedTrainer(GRPOTrainer):
     def __init__(self, *args, choreography_k=1, **kwargs):
         super().__init__(*args, **kwargs)
         self.choreography_k = choreography_k
+        self.processing_class.truncation_side = 'left'
         assert self.use_liger_loss, 'please use liger loss'
 
     def _parse_interleaved(self, completion_ids: torch.Tensor) -> List[List[str]]:
@@ -162,7 +163,7 @@ class ChoreographedTrainer(GRPOTrainer):
             padding_side='left',
             max_length=self.max_prompt_length,
             truncation=True,
-            truncation_side='left',
+            # truncation_side='left',
             add_special_tokens=False,
             return_tensors='pt',
         )
