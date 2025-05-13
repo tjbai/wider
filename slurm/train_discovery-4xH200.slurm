@@ -1,17 +1,17 @@
 #!/bin/bash
-#SBATCH --account=m4789_g
-#SBATCH -constraint=gpu
-#SBATCH --qos=regular
+#SBATCH --account=eisnerlab-hpc
+#SBATCH --partition=azgpuh200
+#SBATCH --qos=normal
 #SBATCH --nodes=1
-#SBATCH --time=24:00:00
+#SBATCH --time=2:00:00
 #SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:h200:4
 #SBATCH --job-name=open_r1/train
-#SBATCH --gres=gpu:4
 #SBATCH --output=./logs/%x-%j.out
 #SBATCH --error=./logs/%x-%j.err
+#SBATCH --mail-user=tbai4@jh.edu
 #SBATCH --mail-type=BEGIN
 #SBATCH --mail-type=END,FAIL
-#SBATCH --exclusive
 
 if [[ "$*" == *"--help"* ]]; then
   echo "Usage: sbatch slurm/train.slurm [options]"
@@ -27,7 +27,7 @@ if [[ "$*" == *"--help"* ]]; then
 fi
 
 set -x -e
-set -euo pipefail
+nvidia-smi
 
 source ~/.bashrc
 source .venv/bin/activate
@@ -36,7 +36,7 @@ echo "START TIME: $(date)"
 
 MODEL="DeepSeek-R1-Distill-Qwen-1.5B"
 TASK="grpo"
-CONFIG_SUFFIX="sanity"
+CONFIG_SUFFIX="sanity_discovery"
 ACCELERATOR="zero2"
 DP=1
 TP=1
@@ -122,53 +122,32 @@ if [[ "$USE_VLLM" == "true" ]]; then
      OPTIONAL_ARGS="$OPTIONAL_ARGS --vllm_server_host=$VLLM_NODE"
 fi
 
-export NCCL_ASYNC_ERROR_HANDLING=1
-export NCCL_ABORT_ON_ERROR=1
-export NCCL_SOCKET_NRETRY=10
-# export NCCL_DEBUG=INFO
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+export NCCL_DEBUG=INFO
 # export NCCL_DEBUG_SUBSYS=COLL
 # export NCCL_SOCKET_NTHREADS=1
 # export NCCL_NSOCKS_PERTHREAD=1
 # export CUDA_LAUNCH_BLOCKING=1
 
-export HF_DATASETS_CACHE=/tmp/$USER/hf_dataset_cache
-mkdir -p $HF_DATASETS_CACHE
+# export HF_DATASETS_CACHE=/tmp/$USER/hf_dataset_cache
+# mkdir -p $HF_DATASETS_CACHE
 
-export CMD=" \
-    src/open_r1/$TASK.py --config $CONFIG_FILE $OPTIONAL_ARGS
-    "
+export ACCELERATE_LOG_LEVEL=debug
+export TRANSFORMERS_VERBOSITY=debug
+export PYTHONUNBUFFERED=1
 
-export LAUNCHER="ACCELERATE_LOG_LEVEL=info TRANSFORMERS_VERBOSITY=info accelerate launch \
-    --config_file recipes/accelerate/$ACCELERATOR.yaml  \
+echo "cuda visible devices: $CUDA_VISIBLE_DEVICES"
+
+accelerate launch \
+    --config_file recipes/accelerate/$ACCELERATOR.yaml \
     --gradient_accumulation_steps $GRAD_ACC_STEPS \
     --num_machines $NUM_NODES \
     --num_processes $WORLD_SIZE \
     --main_process_ip $MASTER_ADDR \
     --main_process_port $MASTER_PORT \
     --machine_rank $SLURM_PROCID \
-    --rdzv_backend=c10d \
+    --rdzv_backend c10d \
     --max_restarts 1 \
-    --tee 3 \
-    "
-
-NODELIST=$(IFS=,; echo "${TRAIN_NODES[*]}")
-
-SRUN_ARGS=" \
-    --wait=60 \
-    --kill-on-bad-exit=1 \
-    --nodes=$NUM_NODES \
-    --ntasks=$NUM_NODES \
-    --nodelist=$NODELIST
-    "
-
-clear
-srun $SRUN_ARGS bash -c "$LAUNCHER $CMD" 2>&1
-
-END_TIME=$(date +%s)
-echo "END TIME: $(date)"
-ELAPSED_SECONDS=$((END_TIME - START_TIME))
-HOURS=$((ELAPSED_SECONDS / 3600))
-MINUTES=$(( (ELAPSED_SECONDS % 3600) / 60 ))
-SECONDS=$((ELAPSED_SECONDS % 60))
-echo "TOTAL JOB TIME: ${HOURS}h ${MINUTES}m ${SECONDS}s (${ELAPSED_SECONDS} seconds)"
+    --tee all \
+    src/open_r1/$TASK.py --config $CONFIG_FILE $OPTIONAL_ARGS
 
