@@ -1,0 +1,11 @@
+compute_environment: LOCAL_MACHINE
+debug: false
+deepspeed_config:
+  zero_stage: 2
+  offload_optimizer_device: none
+  offload_param_device: none
+distributed_type: DEEPSPEED
+main_training_function: main
+mixed_precision: bf16
+num_processes: 4          # match number of GPUs you have
+use_cpu: false

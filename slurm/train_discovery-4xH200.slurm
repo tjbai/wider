@@ -10,7 +10,6 @@
 #SBATCH --output=./logs/%x-%j.out
 #SBATCH --error=./logs/%x-%j.err
 #SBATCH --mail-user=tbai4@jh.edu
-#SBATCH --mail-type=BEGIN
 #SBATCH --mail-type=END,FAIL
 
 if [[ "$*" == *"--help"* ]]; then
@@ -108,20 +107,8 @@ MASTER_ADDR=${NODELIST[0]}
 MASTER_PORT=6000
 TRAIN_NODES=("${NODELIST[@]}")
 
-USE_VLLM="false"
-if [[ -f "$CONFIG_FILE" ]] && grep -qE '^\s*use_vllm:\s*true' "$CONFIG_FILE"; then
-    USE_VLLM="true"
-fi
-if [[ "$USE_VLLM" == "true" ]]; then
-     TRAIN_NODES=("${NODELIST[@]:0:$((NUM_NODES - 1))}")
-     VLLM_NODE=${NODELIST[-1]} # Last node
-     WORLD_SIZE=$((WORLD_SIZE - GPUS_PER_NODE))
-     NUM_NODES=$((NUM_NODES - 1))
-     srun --nodes=1 --ntasks=1 --nodelist=$VLLM_NODE trl vllm-serve --model $MODEL --revision $REVISION --tensor_parallel_size $TP --data_parallel_size $DP &
-
-     OPTIONAL_ARGS="$OPTIONAL_ARGS --vllm_server_host=$VLLM_NODE"
-fi
-
+export ACCELERATE_LOG_LEVEL=debug
+export TRANSFORMERS_VERBOSITY=debug
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=INFO
 # export NCCL_DEBUG_SUBSYS=COLL
@@ -136,7 +123,7 @@ export CMD=" \
     src/open_r1/$TASK.py --config $CONFIG_FILE $OPTIONAL_ARGS
     "
 
-export LAUNCHER="ACCELERATE_LOG_LEVEL=info TRANSFORMERS_VERBOSITY=info accelerate launch \
+export LAUNCHER="accelerate launch \
     --config_file recipes/accelerate/$ACCELERATOR.yaml  \
     --gradient_accumulation_steps $GRAD_ACC_STEPS \
     --num_machines $NUM_NODES \
@@ -154,10 +141,8 @@ NODELIST=$(IFS=,; echo "${TRAIN_NODES[*]}")
 SRUN_ARGS=" \
     --wait=60 \
     --kill-on-bad-exit=1 \
-    --nodes=$NUM_NODES \
-    --ntasks=$NUM_NODES \
-    --nodelist=$NODELIST
+    --gpus=4 \
     "
 
-clear
-srun $SRUN_ARGS bash -c "$LAUNCHER $CMD" 2>&1
+clear; srun $SRUN_ARGS --jobid $SLURM_JOB_ID bash -c "$LAUNCHER $CMD" 2>&1
+
