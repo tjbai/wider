@@ -36,7 +36,7 @@ echo "START TIME: $(date)"
 
 MODEL="DeepSeek-R1-Distill-Qwen-1.5B"
 TASK="grpo"
-CONFIG_SUFFIX="sanity"
+CONFIG_SUFFIX="sanity_perl"
 ACCELERATOR="zero2"
 DP=1
 TP=1

@@ -132,22 +132,32 @@ export NCCL_DEBUG=INFO
 # export HF_DATASETS_CACHE=/tmp/$USER/hf_dataset_cache
 # mkdir -p $HF_DATASETS_CACHE
 
-export ACCELERATE_LOG_LEVEL=debug
-export TRANSFORMERS_VERBOSITY=debug
-export PYTHONUNBUFFERED=1
+export CMD=" \
+    src/open_r1/$TASK.py --config $CONFIG_FILE $OPTIONAL_ARGS
+    "
 
-echo "cuda visible devices: $CUDA_VISIBLE_DEVICES"
-
-accelerate launch \
-    --config_file recipes/accelerate/$ACCELERATOR.yaml \
+export LAUNCHER="ACCELERATE_LOG_LEVEL=info TRANSFORMERS_VERBOSITY=info accelerate launch \
+    --config_file recipes/accelerate/$ACCELERATOR.yaml  \
     --gradient_accumulation_steps $GRAD_ACC_STEPS \
     --num_machines $NUM_NODES \
     --num_processes $WORLD_SIZE \
     --main_process_ip $MASTER_ADDR \
     --main_process_port $MASTER_PORT \
     --machine_rank $SLURM_PROCID \
-    --rdzv_backend c10d \
+    --rdzv_backend=c10d \
     --max_restarts 1 \
-    --tee all \
-    src/open_r1/$TASK.py --config $CONFIG_FILE $OPTIONAL_ARGS
+    --tee 3 \
+    "
 
+NODELIST=$(IFS=,; echo "${TRAIN_NODES[*]}")
+
+SRUN_ARGS=" \
+    --wait=60 \
+    --kill-on-bad-exit=1 \
+    --nodes=$NUM_NODES \
+    --ntasks=$NUM_NODES \
+    --nodelist=$NODELIST
+    "
+
+clear
+srun $SRUN_ARGS bash -c "$LAUNCHER $CMD" 2>&1
