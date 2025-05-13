@@ -106,10 +106,17 @@ def group_sum_accuracy_reward(
 
 
 def format_reward(completions, **kwargs):
-    """Reward function that checks if the reasoning process is enclosed within <think> and </think> tags, while the final answer is enclosed within <answer> and </answer> tags."""
-    pattern = r"^<think>\n.*?\n</think>\n<answer>\n.*?\n</answer>$"
-    completion_contents = [completion[0]["content"] for [completion] in completions]
-    matches = [re.match(pattern, content, re.DOTALL | re.MULTILINE) for content in completion_contents]
+    pattern = r'^<think>\n.*?\n</think>\n<answer>\n.*?\n</answer>$'
+    processed_contents = []
+    PREFILL = '<think>\n'
+
+    for completion in completions:
+        content = completion[0]['content']
+        if not content.lstrip().startswith(PREFILL):
+            content = PREFILL + content
+        processed_contents.append(content)
+
+    matches = [re.match(pattern, content, re.DOTALL | re.MULTILINE) for content in processed_contents]
     return [1.0 if match else 0.0 for match in matches]
 
 

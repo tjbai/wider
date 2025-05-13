@@ -277,6 +277,7 @@ class ChoreographedTrainer(GRPOTrainer):
         if is_conversational(inputs[0]):
             completions = []
             for prompt, batch in zip(prompts, completions_text):
+                # NOTE -- this doesn't actually work... but we patch it in the reward func rather than here
                 prefill = prompt.pop()['content'] if prompt[-1]['role'] == 'assistant' else ''
                 completions.append([
                     [{'role': 'assistant', 'content': prefill + completion}]

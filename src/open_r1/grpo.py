@@ -71,8 +71,7 @@ def main(script_args, training_args, model_args):
         init_wandb_training(training_args)
 
     # Load the dataset
-    # dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
-    dataset = load_dataset(script_args.dataset_name)
+    dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
 
     ################
     # Load tokenizer
